@@ -1,0 +1,4 @@
+pickle
+numpy
+vedo
+potpourri3d
