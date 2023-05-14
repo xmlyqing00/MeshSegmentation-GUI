@@ -3,14 +3,21 @@ import numpy as np
 import trimesh
 from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh
 from potpourri3d import EdgeFlipGeodesicSolver
-from mesh_tools import split_mesh
+from mesh_tools import split_mesh, floodfill_label_mesh
 
+
+mesh_color = 'orange8'
 
 class GUI:
 
     def __init__(self, output_path: str, mesh) -> None:
         
         self.picked_pts = []
+        self.picked_pts = [
+            {'pos': np.array([ 0.10138161,  0.21074224, -0.02015545]), 'id': 132, 'name': '0_0'}, 
+            {'pos': np.array([0.19300433, 0.27309528, 0.01783872]), 'id': 170, 'name': '0_1'}, 
+            {'pos': np.array([ 0.16398083,  0.414382  , -0.08792435]), 'id': 261, 'name': '0_2'}
+        ]
         self.arrow_names = []
         self.geodesic_paths = []
         self.all_geodesic_paths = []
@@ -87,9 +94,26 @@ class GUI:
 
         self.tri_mesh = new_mesh
         self.mesh = Mesh([new_mesh.vertices.tolist(), new_mesh.faces.tolist()])
-        plt.show(self.mesh)
 
-        # self.save()
+        self.all_geodesic_paths.append(np.concatenate(self.geodesic_paths, 0))
+        f_labels = floodfill_label_mesh(
+            self.mesh, 
+            self.all_geodesic_paths, 
+            self.tri_mesh.vertex_faces
+        )
+        f_colors = []
+        for x in f_labels:
+            if x == 1:
+                f_colors.append([0, 200, 0])
+            elif x == 2:
+                f_colors.append([0, 0, 200])
+            else:
+                f_colors.append([200, 0, 0])
+        self.mesh.cellcolors = f_colors
+
+        plt.add(self.mesh)
+
+        self.save()
         plt.render()
 
     def clear_pts(self):
@@ -113,9 +137,6 @@ class GUI:
         self.seg_n += 1
         print(f'Save {self.seg_n} geodesic paths.', 'Ready for the next segmentation.')
 
-        self.all_geodesic_paths.append(self.geodesic_paths)
-        # print(self.all_geodesic_paths)
-
         with open(self.output_path, 'wb') as f:
             pickle.dump(self.all_geodesic_paths, f)
 
@@ -135,11 +156,11 @@ msg.text(
 
 # Load the OBJ file
 mesh = load('data/manohand_0.obj')
-mesh.phong()
+mesh.cellcolors = [0, 0, 200]
 output_path = 'geodesic_paths.pt'
 gui = GUI(output_path, mesh)
 
-plt = Plotter(axes=1, bg='white')
+plt = Plotter(axes=8, bg='white')
 
 plt.add_callback('left click', gui.on_mouse_click)
 plt.add_callback('key press', gui.on_key_press)

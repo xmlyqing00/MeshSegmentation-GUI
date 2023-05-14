@@ -1,5 +1,7 @@
 import numpy as np
 import trimesh
+from vedo import Mesh
+import queue
 
 
 """
@@ -9,7 +11,9 @@ queries: [M, 3]
 def find_intersection_pairs(queries, edge_verts):
     v = queries[:, None, :] - edge_verts[None, :, 0, :] ## [M, N, 3]
     v_norm = np.linalg.norm(v, axis=-1) 
-    ev = v/v_norm[...,None] ## [M, N, 3]
+    ev = v / v_norm[...,None] ## [M, N, 3]
+    x = np.nonzero(v_norm < 1e-5)
+    print('len != 0', x)
 
     # print(np.nonzero(v_norm==0))
 
@@ -22,6 +26,8 @@ def find_intersection_pairs(queries, edge_verts):
 
     intersections = []
     unique_qids, counts = np.unique(qids, return_counts=True)
+
+    queries_for_insert = []
     for qid, cnt in zip(unique_qids, counts):
         # print(qid, cnt)
         eid = eids[qids == qid]
@@ -30,8 +36,9 @@ def find_intersection_pairs(queries, edge_verts):
         # print(ratio, eid, intersected_eid)
         # assert len(intersected_eid) == 1
         intersections.append((qid, intersected_eid[0]))
+        queries_for_insert.append(queries[qid])
     # print(intersections, len(intersections))
-    return intersections
+    return queries_for_insert, intersections
 
 
 """
@@ -103,12 +110,12 @@ def split_mesh_by_path(mesh, inserted_points, edges, intersection_pairs):
     print('check')
     print(vertices.shape, faces.max())
 
-    for f in faces:
-        for i in range(3):
-            v0 = f[i]
-            v1 = f[(i + 1) % 3 ]
-            if v0 == v1:
-                print('self_intersect', f)
+    # for f in faces:
+    #     for i in range(3):
+    #         v0 = f[i]
+    #         v1 = f[(i + 1) % 3 ]
+    #         if v0 == v1:
+    #             print('self_intersect', f)
     out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False, maintain_order=True)
     # out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     return out_mesh
@@ -117,7 +124,8 @@ def split_mesh_by_path(mesh, inserted_points, edges, intersection_pairs):
 
 def split_mesh(mesh, path_pts):
     ## add some noises to the path_pts, so we can quickly find the faces that the path intersects
-    path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
+    # path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
+    path_pths_without_ends = path_pts[:, :] 
     pq_mesh = trimesh.proximity.ProximityQuery(mesh)
     queries = np.array(path_pths_without_ends)
 
@@ -142,11 +150,63 @@ def split_mesh(mesh, path_pts):
     edges_unique = edges_sorted[unique] 
     # write_obj_file(os.path.join(save_dir, f"selected_faces.obj"), face_verts)
     edge_verts = mesh.vertices[edges_unique]
-    intersection_pairs = find_intersection_pairs(path_pths_without_ends, edge_verts)
+    queries_for_insert, intersection_pairs = find_intersection_pairs(path_pths_without_ends, edge_verts)
 
     """
     intersection_pairs: a list of pairs
     pair: (qid, eid)
     """
-    mesh = split_mesh_by_path(mesh, path_pths_without_ends, edges_unique, intersection_pairs)
+    mesh = split_mesh_by_path(mesh, queries_for_insert, edges_unique, intersection_pairs)
     return mesh
+
+
+def floodfill_label_mesh(mesh: Mesh, all_geodesic_paths: list, vertex_faces: list):
+
+    segment_vertices = np.concatenate(all_geodesic_paths)
+    pids_border = set()
+    for i in range(segment_vertices.shape[0]):
+        pid = mesh.closest_point(segment_vertices[i], return_point_id=True)
+        pids_border.add(pid)
+
+    f = mesh.faces()
+    label_num = 0
+    f_labels = np.zeros(len(f), np.int32)
+    for fid in range(len(f)):
+        if f_labels[fid] > 0:
+            continue
+        
+        label_num += 1
+        f_labels[fid] = label_num
+        que = queue.Queue()
+        que.put(fid)
+        while not que.empty():
+
+            fid_cur = que.get()
+            f_pts = f[fid_cur]
+            flag_border_face = False
+            for vid0 in range(3):
+                vid1 = (i + 3) % 3
+                if f_pts[vid0] in pids_border:
+                    flag_border_face = True
+                    break
+            
+            if flag_border_face:
+                # f_labels[fid_cur] = 1000
+                print(fid_cur)
+                continue
+
+            for vid0 in range(3):
+                f_next_list = vertex_faces[f_pts[vid0]]
+                # print('print vertex-faces:', f_pts[vid0])
+                for f_next_id in f_next_list:
+                    if f_next_id == -1:
+                        break
+                    if f_labels[f_next_id] > 0:
+                        continue
+
+                    f_labels[f_next_id] = label_num
+                    que.put(f_next_id)
+    
+    print(label_num)
+
+    return f_labels
