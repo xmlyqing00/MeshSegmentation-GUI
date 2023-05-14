@@ -1,12 +1,14 @@
 import pickle
 import numpy as np
-from vedo import load, Plotter, Sphere, Arrow, Text2D
+import trimesh
+from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh
 from potpourri3d import EdgeFlipGeodesicSolver
+from mesh_tools import split_mesh
 
 
 class GUI:
 
-    def __init__(self, output_path: str) -> None:
+    def __init__(self, output_path: str, mesh) -> None:
         
         self.picked_pts = []
         self.arrow_names = []
@@ -15,6 +17,13 @@ class GUI:
         self.seg_n = 0
 
         self.output_path = output_path
+        self.mesh = mesh
+        self.tri_mesh = trimesh.Trimesh(
+            mesh.vertices(), 
+            mesh.faces(),
+            process=False,
+            maintain_order=True
+        )
 
     def on_mouse_click(self, event):
         mesh = event.actor
@@ -39,33 +48,32 @@ class GUI:
 
     def on_key_press(self, event):
 
-        mesh = event.actor
-        if not mesh:
-            return
-        
-        if event.keypress == 'g':
-            self.compute_geodesic_path()
+        if event.keypress == 'f' or event.keypress == 'g':
+            self.compute_geodesic_path(event.keypress == 'g')
         elif event.keypress == 'c':
             self.clear_pts()
-        elif event.keypress == 's':
-            self.save()
-    
-    def compute_geodesic_path(self):
-        print('Compute the Geodesic path')
+        
+    def compute_geodesic_path(self, loop_flag: bool = False):
+        print('Compute the Geodesic path. Loop:', loop_flag)
         print(self.picked_pts)
 
-        v = mesh.vertices()
-        f = np.array(mesh.faces())
+        v = self.mesh.vertices()
+        f = np.array(self.mesh.faces())
+        print('shapes', len(v), f.shape)
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         loop_pts = self.picked_pts
-        loop_pts.append(loop_pts[0])
+        if loop_flag:
+            loop_pts.append(loop_pts[0])
+
+        new_pts = []
         for i in range(1, len(loop_pts)):
             v_start = loop_pts[i - 1]['id']
             v_end = loop_pts[i]['id']
             path_pts = path_solver.find_geodesic_path(v_start, v_end)
             print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
             self.geodesic_paths.append(path_pts)
+            new_pts.extend(path_pts[1:-1])
 
             for path_id in range(1, path_pts.shape[0]):
                 arrow = Arrow(path_pts[path_id - 1], path_pts[path_id], s=0.0005, c='green')
@@ -73,6 +81,15 @@ class GUI:
                 plt.add(arrow)
                 self.arrow_names.append(arrow.name)
 
+        # seg_path = np.concatenate(self.geodesic_paths, axis=0)
+        new_mesh = split_mesh(self.tri_mesh, np.array(new_pts))
+        plt.remove(self.mesh)
+
+        self.tri_mesh = new_mesh
+        self.mesh = Mesh([new_mesh.vertices.tolist(), new_mesh.faces.tolist()])
+        plt.show(self.mesh)
+
+        # self.save()
         plt.render()
 
     def clear_pts(self):
@@ -110,15 +127,17 @@ class GUI:
 msg = Text2D(pos='bottom-left', font="VictorMono") 
 msg.text(
     'Mouse left-click to pick vertex.\n' \
-    'Press g to compute Geodesic path.\n' \
+    'Press f/g to compute Geodesic path/loop.\n' \
     'Press s to save all Geodesic paths.\n' \
+    'Press z to start the next segmentation.\n' \
     'Press c to clear the points.'
 )
 
 # Load the OBJ file
 mesh = load('data/manohand_0.obj')
+mesh.phong()
 output_path = 'geodesic_paths.pt'
-gui = GUI(output_path)
+gui = GUI(output_path, mesh)
 
 plt = Plotter(axes=1, bg='white')
 
