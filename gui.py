@@ -210,8 +210,6 @@ msg = Text2D(pos='bottom-left', font="VictorMono")
 msg.text(
     'Mouse left-click to pick vertex.\n' \
     'Press f/g to compute Geodesic path/loop.\n' \
-    'Press s to save all Geodesic paths.\n' \
-    'Press z to start the next segmentation.\n' \
     'Press c to clear the points.'
 )
 
