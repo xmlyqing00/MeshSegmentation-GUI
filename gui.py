@@ -1,8 +1,10 @@
 import pickle
+import argparse
+import os
 import numpy as np
 import trimesh
 import json
-from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh
+from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write
 from potpourri3d import EdgeFlipGeodesicSolver
 from mesh_tools import split_mesh, floodfill_label_mesh
 from PIL import Image
@@ -18,37 +20,13 @@ class NpEncoder(json.JSONEncoder):
 
 class GUI:
 
-    def __init__(self, output_path: str, mesh) -> None:
+    def __init__(self, mesh: Mesh, output_path: str, mask: list = None) -> None:
         
         self.picked_pts = []
-        # self.picked_pts = [
-        #     {'pos': np.array([ 0.27446488, -0.20893057,  0.07779584]), 'id': 703, 'name': '2_0'}, 
-        #     {'pos': np.array([ 0.3607488 , -0.13651259,  0.05840396]), 'id': 706, 'name': '2_1'}, 
-        #     {'pos': np.array([ 0.2932661 , -0.03708942,  0.09062152]), 'id': 712, 'name': '2_2'}, 
-        #     {'pos': np.array([ 0.21838944, -0.19930978,  0.11183543]), 'id': 711, 'name': '2_3'}
-        # ]
-
-        # self.picked_pts = [
-        #     {'pos': np.array([0.0953061 , 0.3834636 , 0.11388186]), 'id': 165, 'name': '1_0'}, 
-        #     {'pos': np.array([0.1990558 , 0.38746288, 0.13386326]), 'id': 49, 'name': '1_1'}, 
-        #     {'pos': np.array([0.17974353, 0.52697086, 0.08041261]), 'id': 87, 'name': '1_2'}, 
-        #     {'pos': np.array([0.11824824, 0.52530175, 0.08713669]), 'id': 213, 'name': '1_3'}]
-
-        # self.picked_pts = [
-        #     {'pos': np.array([ 0.2231295 , -0.19414169,  0.08345791]), 'id': 701, 'name': '2_0'}, 
-        #     {'pos': np.array([ 0.27446488, -0.20893057,  0.07779584]), 'id': 703, 'name': '2_1'}, 
-        #     {'pos': np.array([ 0.34063372, -0.0659999 ,  0.11476872]), 'id': 707, 'name': '2_2'}, 
-        #     {'pos': np.array([ 0.22675769, -0.03316575,  0.14041592]), 'id': 758, 'name': '2_3'}
-        # ]
-        # self.picked_pts = [
-        #     {'pos': np.array([ 0.10138161,  0.21074224, -0.02015545]), 'id': 132, 'name': '0_0'}, 
-        #     {'pos': np.array([0.19300433, 0.27309528, 0.01783872]), 'id': 170, 'name': '0_1'}, 
-        #     {'pos': np.array([ 0.16398083,  0.414382  , -0.08792435]), 'id': 261, 'name': '0_2'}
-        # ]
+        
         self.all_picked_pts = []
         self.arrow_names = []
         self.geodesic_paths = []
-        self.all_geodesic_paths = []
         self.seg_n = 0
         self.loop_flag = True
 
@@ -60,6 +38,20 @@ class GUI:
             process=False,
             maintain_order=True
         )
+
+        if mask:
+            f_labels = np.zeros(len(mesh.faces()), dtype=np.int32)
+            for i, seg in enumerate(mask):
+                for fid in seg:
+                    f_labels[fid] = i + 1
+
+            f_adj = self.tri_mesh.face_adjacency
+            fe_adj = self.tri_mesh.face_adjacency_edges
+
+            for i in range(len(f_adj)):
+                if f_labels[f_adj[i][0]] != f_labels[f_adj[i][1]]:
+                    self.all_picked_pts.append([fe_adj[i][0], fe_adj[i][1]])
+        
         self.update_mesh_color()
 
     def on_mouse_click(self, event):
@@ -101,11 +93,9 @@ class GUI:
             self.clear_pts()
     
     def update_mesh_color(self):
-        if len(self.geodesic_paths) > 0:
-            self.all_geodesic_paths.append(np.concatenate(self.geodesic_paths, 0))
 
         picked_pt_pos = [x['pos'] for x in self.picked_pts]
-        print(picked_pt_pos)
+        # print(picked_pt_pos)
 
         if len(picked_pt_pos) > 0:
             if self.loop_flag:
@@ -194,43 +184,62 @@ class GUI:
         self.seg_n += 1
         print(f'Save {self.seg_n} geodesic paths.', 'Ready for the next segmentation.')
 
-        with open(self.output_path, 'wb') as f:
-            pickle.dump(self.all_geodesic_paths, f)
-
-        # print('mask_faces', self.mask_faces)
-        with open('mask.json', 'w') as f:
+        mask_path = self.output_path.replace('.obj', '_mask.json')
+        with open(mask_path, 'w') as f:
             json.dump(self.mask_faces, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+
+        print(self.output_path)
+        write(self.mesh, self.output_path)
 
         self.picked_pts = []
         self.arrow_names = []
         self.geodesic_paths = []
 
 
-msg = Text2D(pos='bottom-left', font="VictorMono") 
-msg.text(
-    'Mouse left-click to pick vertex.\n' \
-    'Press f/g to compute Geodesic path/loop.\n' \
-    'Press c to clear the points.'
-)
+if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser('Segmentation GUI')
+    parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
+    parser.add_argument('--outdir', type=str, default='./output', help='Output path.')
+    args = parser.parse_args()
 
-color_img = np.asarray(Image.open('assets/cm_tab20.png').convert('RGBA'))
-cmap = []
-print(color_img.shape)
-for i in range(20):
-    c = 25 * (i % 20) + 10
-    cmap.append(color_img[20, c])
+    print(args)
 
-# Load the OBJ file
-mesh = load('data/manohand_0.obj')
-# mesh.cellcolors = [0, 0, 200]
-output_path = 'geodesic_paths.pt'
-gui = GUI(output_path, mesh)
+    msg = Text2D(pos='bottom-left', font="VictorMono") 
+    msg.text(
+        'Mouse left-click to pick vertex.\n' \
+        'Press f/g to compute Geodesic path/loop.\n' \
+        'Press c to clear the points.\n' \
+        'Press h to see more help.'
+    )
 
-plt = Plotter(axes=8, bg='white')
+    color_img = np.asarray(Image.open('assets/cm_tab20.png').convert('RGBA'))
+    cmap = []
+    for i in range(20):
+        c = 25 * (i % 20) + 10
+        cmap.append(color_img[20, c])
 
-plt.add_callback('left click', gui.on_mouse_click)
-plt.add_callback('key press', gui.on_key_press)
+    # Load the OBJ file
+    mesh = load(args.input)
+    obj_name = os.path.basename(args.input).split('.')[0]
+    output_path = os.path.join(args.outdir, f'{obj_name}_labeled.obj')
+    os.makedirs(args.outdir, exist_ok=True)
 
-plt.show(mesh, msg)
-plt.close()
+    # Try to load the mask
+    mask_path = os.path.join(os.path.dirname(args.input), 'mask.json')
+    mask = None
+    if os.path.exists(mask_path):
+        with open(mask_path, 'r') as f:
+            mask = json.load(f)
+
+    gui = GUI(mesh, output_path, mask)
+
+    plt = Plotter(axes=8, bg='white')
+
+    plt.add_callback('left click', gui.on_mouse_click)
+    plt.add_callback('key press', gui.on_key_press)
+
+    plt.show(mesh, msg)
+    plt.close()
+
+    

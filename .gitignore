@@ -2,4 +2,6 @@ geodesic_paths.pt
 
 .DS_Store
 .vscode/
-mask.json
+__pycache__/
+
+output/

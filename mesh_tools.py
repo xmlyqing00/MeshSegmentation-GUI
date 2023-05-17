@@ -13,9 +13,8 @@ def find_intersection_pairs(queries, edge_verts):
     v = queries[:, None, :] - edge_verts[None, :, 0, :] ## [M, N, 3]
     v_norm = np.linalg.norm(v, axis=-1) 
     ev = v / v_norm[...,None] ## [M, N, 3]
-    x = np.nonzero(v_norm < 1e-5)
+    # x = np.nonzero(v_norm < 1e-5)
     # print('len != 0', x)
-
     # print(np.nonzero(v_norm==0))
 
     b = edge_verts[:, 1, :] - edge_verts[:, 0, :] ## [N, 3]
@@ -31,23 +30,21 @@ def find_intersection_pairs(queries, edge_verts):
     eid_set = set()
     queries_for_insert = []
     for qid, cnt in zip(unique_qids, counts):
-        # print(qid, cnt)
+        
         eid = eids[qids == qid]
         ratio = v_norm[qid, eid] / b_norm[eid]
 
         min_eid = ratio.argmin()
         intersection_eid = eid[min_eid]
         if ratio[min_eid] < 1:
-        # intersected_eid = eid[ratio <= 1]
-        # print(ratio, eid, intersected_eid)
-        # assert len(intersected_eid) == 1
+
             if intersection_eid in eid_set:
                 continue
 
             eid_set.add(intersection_eid)
             intersections.append((qid, intersection_eid))
             queries_for_insert.append(queries[qid])
-    # print(intersections, len(intersections))
+
     return queries_for_insert, intersections
 
 
@@ -219,51 +216,3 @@ def floodfill_label_mesh(
     groups = [x for x in nx.connected_components(graph)]
 
     return groups
-
-    # segment_vertices = np.concatenate(all_geodesic_paths)
-    # pids_border = set()
-    # for i in range(segment_vertices.shape[0]):
-    #     pid = mesh.closest_point(segment_vertices[i], return_point_id=True)
-    #     pids_border.add(pid)
-
-    # print('border', pids_border)
-
-    # f = mesh.faces()
-    # label_num = 0
-    # f_labels = np.zeros(len(f), np.int32)
-    # for fid in range(len(f)):
-    #     if f_labels[fid] > 0:
-    #         continue
-        
-    #     print('new component', label_num + 1, fid, f[fid])
-
-    #     label_num += 1
-    #     f_labels[fid] = label_num
-    #     que = queue.Queue()
-    #     que.put(fid)
-    #     while not que.empty():
-
-    #         fid_cur = que.get()
-    #         f_pts = f[fid_cur]
-    #         # flag_border_face = False
-    #         for vid0 in range(3):
-                
-    #             if f_pts[vid0] in pids_border:
-    #                 continue
-            
-    #             f_next_list = vertex_faces[f_pts[vid0]]
-    #             # print('print vertex-faces:', f_pts[vid0])
-    #             for f_next_id in f_next_list:
-    #                 if f_next_id == -1:
-    #                     break
-    #                 # if f_next_id == 1241 or f_next_id == 1242:
-    #                     # print(f_next_id)
-    #                 if f_labels[f_next_id] > 0:
-    #                     continue
-
-    #                 f_labels[f_next_id] = label_num
-    #                 que.put(f_next_id)
-    
-    # print(label_num)
-
-    # return groups
