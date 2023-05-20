@@ -4,7 +4,7 @@ import os
 import numpy as np
 import trimesh
 import json
-from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write
+from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write, Line
 from potpourri3d import EdgeFlipGeodesicSolver
 from mesh_tools import split_mesh, floodfill_label_mesh
 from PIL import Image
@@ -39,6 +39,15 @@ class GUI:
             maintain_order=True
         )
 
+        self.mesh_size = np.array([
+            self.tri_mesh.vertices[:, 0].max() - self.tri_mesh.vertices[:, 0].min(),
+            self.tri_mesh.vertices[:, 1].max() - self.tri_mesh.vertices[:, 1].min(),
+            self.tri_mesh.vertices[:, 2].max() - self.tri_mesh.vertices[:, 2].min(),
+        ])
+        self.thres_nearest_pt = 1e-1 * self.mesh_size.min()
+        self.point_size = 2e-2 * self.mesh_size.min()
+        self.arrow_size = 1e-3 * self.mesh_size.min()
+
         if mask:
             f_labels = np.zeros(len(mesh.faces()), dtype=np.int32)
             for i, seg in enumerate(mask):
@@ -65,10 +74,18 @@ class GUI:
         if mouse_pt is None:
             return
 
+        print('Mouse click:', mouse_pt)
+        mouse_pt = self.check_nearest_point(mouse_pt)
+
         pid = mesh.closest_point(mouse_pt, return_point_id=True)
         pt = mesh.vertices()[pid]
 
-        picked_pt = Sphere(pt, r=0.01, c='black')
+        # for picked_pts in self.all_picked_pts:
+        #     if pid in picked_pts:
+        #         print('The point has been picked.')
+        #         return
+
+        picked_pt = Sphere(pt, r=self.point_size, c='black')
         picked_pt.name = f'{self.seg_n}_{len(self.picked_pts)}'
 
         print(f'Picked a vertex on the mesh. ID: {picked_pt.name}, Vertex ID: {pid}. Position: {pt}')
@@ -92,15 +109,31 @@ class GUI:
         elif event.keypress == 'c':
             self.clear_pts()
     
+    
+    def check_nearest_point(self, mouse_pt):
+
+        if len(self.all_picked_pts) == 0:
+            return mouse_pt
+        
+        existing_pts = np.concatenate(self.all_picked_pts, axis=0)
+        dist = np.linalg.norm(existing_pts - mouse_pt, axis=1)
+        idx = np.argmin(dist)
+        if dist[idx] < self.thres_nearest_pt:
+            print('Find nearest existing pt:', existing_pts, 'Distance:', dist[idx])
+            return existing_pts[idx]
+        else:
+            print('The nearest existing pt is too far:', existing_pts, 'Distance:', dist[idx])
+            return mouse_pt
+
+
     def update_mesh_color(self):
 
         picked_pt_pos = [x['pos'] for x in self.picked_pts]
-        # print(picked_pt_pos)
 
         if len(picked_pt_pos) > 0:
             if self.loop_flag:
                 picked_pt_pos.append(picked_pt_pos[0])
-            self.all_picked_pts.append(picked_pt_pos)
+            self.all_picked_pts.append(np.array(picked_pt_pos))
 
         groups = floodfill_label_mesh(
             self.mesh, 
@@ -140,12 +173,18 @@ class GUI:
             v_start = loop_pts[i - 1]['id']
             v_end = loop_pts[i]['id']
             path_pts = path_solver.find_geodesic_path(v_start, v_end)
-            print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
+            # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
             self.geodesic_paths.append(path_pts)
             new_pts.extend(path_pts[1:-1])
 
             for path_id in range(1, path_pts.shape[0]):
-                arrow = Arrow(path_pts[path_id - 1], path_pts[path_id], s=0.0005, c='black')
+                # arrow = Arrow(path_pts[path_id - 1], path_pts[path_id], s=self.arrow_size, c='black')
+                arrow = Line(
+                    path_pts[path_id - 1], 
+                    path_pts[path_id], 
+                    lw=self.arrow_size, 
+                    c='black'
+                )
                 arrow.name = f'{self.seg_n}_{len(self.arrow_names)}'
                 plt.add(arrow)
                 self.arrow_names.append(arrow.name)
@@ -234,7 +273,7 @@ if __name__ == '__main__':
 
     # Try to load the mask
     mask = None
-    if os.path.exists(args.mask):
+    if args.mask and os.path.exists(args.mask):
         with open(args.mask, 'r') as f:
             mask = json.load(f)
 
