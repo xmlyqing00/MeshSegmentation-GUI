@@ -20,7 +20,7 @@ class NpEncoder(json.JSONEncoder):
 
 class GUI:
 
-    def __init__(self, mesh: Mesh, output_path: str, mask: list = None) -> None:
+    def __init__(self, mesh: Mesh, output_dir: str, mask: list = None) -> None:
         
         self.picked_pts = []
         
@@ -30,7 +30,7 @@ class GUI:
         self.seg_n = 0
         self.loop_flag = True
 
-        self.output_path = output_path
+        self.output_dir = output_dir
         self.mesh = mesh
         self.tri_mesh = trimesh.Trimesh(
             mesh.vertices(), 
@@ -184,12 +184,18 @@ class GUI:
         self.seg_n += 1
         print(f'Save {self.seg_n} geodesic paths.', 'Ready for the next segmentation.')
 
-        mask_path = self.output_path.replace('.obj', '_mask.json')
+        obj_name = os.path.dirname(self.output_dir).split('/')[-1]
+        single_obj_dir = os.path.join(self.output_dir, 'single')
+        os.makedirs(single_obj_dir, exist_ok=True)
+
+        obj_path = os.path.join(single_obj_dir, f'{obj_name}.obj')
+        mask_path = os.path.join(self.output_dir, 'mask.json')
+        print('Save to', obj_path, mask_path)
+
         with open(mask_path, 'w') as f:
             json.dump(self.mask_faces, f, cls=NpEncoder, ensure_ascii=False, indent=4)
 
-        print(self.output_path)
-        write(self.mesh, self.output_path)
+        write(self.mesh, obj_path)
 
         self.picked_pts = []
         self.arrow_names = []
@@ -200,6 +206,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Segmentation GUI')
     parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
+    parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output path.')
     args = parser.parse_args()
 
@@ -226,10 +233,9 @@ if __name__ == '__main__':
     os.makedirs(args.outdir, exist_ok=True)
 
     # Try to load the mask
-    mask_path = os.path.join(os.path.dirname(args.input), 'mask.json')
     mask = None
-    if os.path.exists(mask_path):
-        with open(mask_path, 'r') as f:
+    if os.path.exists(args.mask):
+        with open(args.mask, 'r') as f:
             mask = json.load(f)
 
     gui = GUI(mesh, output_path, mask)
