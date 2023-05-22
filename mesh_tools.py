@@ -53,21 +53,13 @@ inserted_points: [M, 3]
 edges: a list of edges (vid0, vid1) in mesh
 intersection_pairs: a list of pairs, pair:(insert pt id, edge id)
 """
-def split_mesh_by_path(mesh, inserted_points, edges, intersection_pairs):
+def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_pairs):
 
     num_verts = len(mesh.vertices)
 
     reverse_edges = edges[:, [1,0]]
     edges = edges.tolist()
     reverse_edges = reverse_edges.tolist()
-
-    # masked_face_ids = set()
-    # for i, e in enumerate(mesh.edges):
-    #     e = e.tolist()
-    #     if e in edges:
-    #         masked_face_ids.add(mesh.edges_face[i].tolist())
-    #     elif e in reverse_edges:
-    #         masked_face_ids.add(mesh.edges_face[i].tolist())
 
     masked_face_ids = set()
     for i, pair in enumerate(intersection_pairs):
@@ -93,17 +85,22 @@ def split_mesh_by_path(mesh, inserted_points, edges, intersection_pairs):
     # print('masked_face_ids', masked_face_ids)
 
     faces_new = mesh.faces[masked_face_ids].tolist()
+    face_patches_new = face_patches[masked_face_ids].tolist()
+
     ## remove faces from inserted faces that will be inserted with nodes
     for i, pair in enumerate(intersection_pairs):
         e = edges[pair[1]]
         ## find faces that will get inserted nodes
         removed_faces = []
         inserted_faces = []
+        inserted_faces = []
         inserted = num_verts + i
+        face_patches_old = []
 
-        for fi in faces_new:
+        for fidx, fi in enumerate(faces_new):
             if e[0] in fi and e[1] in fi:
                 removed_faces.append(fi)
+                face_patches_old.append(face_patches_new[fidx])
                 a = e[0]
                 b = e[1]
                 ia = fi.index(e[0])
@@ -121,31 +118,25 @@ def split_mesh_by_path(mesh, inserted_points, edges, intersection_pairs):
             print('vertex-face e0', mesh.vertex_faces[e[0]])
             print('vertex-face e1', mesh.vertex_faces[e[1]])
         for rf in removed_faces:
-            faces_new.remove(rf)
-        for fi in inserted_faces:
+            rf_idx = faces_new.index(rf)
+            faces_new.pop(rf_idx)
+            face_patches_new.pop(rf_idx)
+            # faces_new.remove(rf)
+        for fidx, fi in enumerate(inserted_faces):
             faces_new.append(fi)
+            face_patches_new.append(face_patches_old[fidx // 2])
 
-
-    # print(faces_new)
+        # print(len(removed_faces), len(inserted_faces))
 
     vertices = np.concatenate([mesh.vertices, inserted_points], axis=0)
     faces = np.concatenate([mesh.faces[kept_face_ids>0], faces_new], axis=0)
-
-    # print('check', vertices.shape, faces.max())
-
-    # for f in faces:
-    #     for i in range(3):
-    #         v0 = f[i]
-    #         v1 = f[(i + 1) % 3 ]
-    #         if v0 == v1:
-    #             print('self_intersect', f)
+    face_patches_out = np.concatenate([face_patches[kept_face_ids>0], face_patches_new], axis=0)
     out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False, maintain_order=True)
     # out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    return out_mesh
+    return out_mesh, face_patches_out
 
 
-
-def split_mesh(mesh, path_pts):
+def split_mesh(mesh, path_pts, face_patches):
     ## add some noises to the path_pts, so we can quickly find the faces that the path intersects
     # path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
     path_pths_without_ends = path_pts[:, :] 
@@ -179,40 +170,47 @@ def split_mesh(mesh, path_pts):
     intersection_pairs: a list of pairs
     pair: (qid, eid)
     """
-    mesh = split_mesh_by_path(mesh, queries_for_insert, edges_unique, intersection_pairs)
-    return mesh
+    mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
+    group_id = 0
+    mask = []
+    while True:
+        idmask = face_patches_out == group_id
+        face_ids = idmask.nonzero()[0]
+        if len(face_ids) == 0:
+            break
+        mask.append(face_ids)
+        # print('seg output', group_id, mask)
+        group_id += 1
+
+    return mesh, mask
 
 
 def floodfill_label_mesh(
     mesh: Mesh, 
-    all_picked_pts: list, 
+    boundary_edges: set,
+    all_picked_pt_pos: list, 
     face_adjacency: list,
     face_adjacency_edges: list
 ):
-
-    if len(all_picked_pts) == 0:
-        f = mesh.faces()
-        return [list(range(len(f)))]
-        
-    seg_edges = set()
+    
     face_adjacency_edges = np.sort(face_adjacency_edges, axis=1)
-    for seg_path in all_picked_pts:
-        for i in range(1, len(seg_path)):
-            geodesic_mesh = mesh.geodesic(seg_path[i - 1], seg_path[i])
+    for picked_pt_pos in all_picked_pt_pos:
+        for i in range(1, len(picked_pt_pos)):
+            geodesic_mesh = mesh.geodesic(picked_pt_pos[i - 1], picked_pt_pos[i])
             geodesic_vertices = geodesic_mesh.vertices()
             for i in range(1, len(geodesic_vertices)):
                 v0 = mesh.closest_point(geodesic_vertices[i - 1], return_point_id=True)
                 v1 = mesh.closest_point(geodesic_vertices[i], return_point_id=True)
-                seg_edges.add((min(v0, v1), max(v0, v1)))
+                boundary_edges.add((min(v0, v1), max(v0, v1)))
 
     assert len(face_adjacency) == len(face_adjacency_edges)
 
     face_adjacency_valid = []
     for i in range(len(face_adjacency_edges)):
-        if tuple(face_adjacency_edges[i].tolist()) not in seg_edges:
+        if tuple(face_adjacency_edges[i].tolist()) not in boundary_edges:
             face_adjacency_valid.append(face_adjacency[i])
 
     graph = nx.from_edgelist(face_adjacency_valid)
-    groups = [x for x in nx.connected_components(graph)]
+    groups = [list(x) for x in nx.connected_components(graph)]
 
     return groups
