@@ -54,7 +54,7 @@ class GUI:
             self.tri_mesh.vertices[:, 1].max() - self.tri_mesh.vertices[:, 1].min(),
             self.tri_mesh.vertices[:, 2].max() - self.tri_mesh.vertices[:, 2].min(),
         ])
-        self.thres_nearest_pt = 5e-2 * self.mesh_size.min()
+        self.thres_nearest_pt = 2e-2 * self.mesh_size.min()
         self.point_size = 1e-2 * self.mesh_size.min()
         self.boundary_size = 1e-2 * self.mesh_size.min()
         self.shadow_dist = 0.2 * self.mesh_size.min()
@@ -162,6 +162,7 @@ class GUI:
     def toggle_merge_mode(self):
         self.merge_mode = not self.merge_mode
         if self.merge_mode:
+            self.patches_to_merge = []
             print('Merge mode on.')
         else:
             print('Merge mode off.')
@@ -245,7 +246,7 @@ class GUI:
 
     def compute_geodesic_path(self):
 
-        print('Compute geodesic path.', f'Number of picked pts: {len(self.all_picked_pts)}')
+        print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices()
         f = np.array(self.mesh.faces())
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
