@@ -104,8 +104,10 @@ class GUI:
             self.stack_picked_pts(event.keypress == 'g')
         elif event.keypress == 'z':
             self.compute_geodesic_path()
+        elif event.keypress == 'b':
+            self.clear_last_pt()
         elif event.keypress == 'c':
-            self.clear_pts()
+            self.clear_all_pts()
         elif event.keypress == 'd':
             self.load_last_mask()
         elif event.keypress == 'm':
@@ -137,6 +139,7 @@ class GUI:
 
         self.face_patches = np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
         for i, seg in enumerate(self.mask):
+            print('patch_size:', i, len(seg))
             for fid in seg:
                 self.face_patches[fid] = i
 
@@ -214,7 +217,19 @@ class GUI:
     def update_mesh_color(self):
 
         for group_idx, group in enumerate(self.mask):
+
             self.mesh.cellcolors[group] = cmap[group_idx % 20]
+            # if group_idx == 72:
+            #     self.mesh.cellcolors[group] = (255, 0, 0, 255)
+            #     f = self.tri_mesh.faces[group]
+            #     print('f', f)
+            #     v = self.tri_mesh.vertices[f]
+            #     print('v', v)
+                
+            # else:
+            #     self.mesh.cellcolors[group] = (0, 0, 0, 255)
+            #     print('group_idx', group_idx, self.mesh.cellcolors[group[0]])
+
         
         self.plt.remove(self.arrow_objs)
         self.arrow_objs = []
@@ -245,6 +260,11 @@ class GUI:
 
 
     def compute_geodesic_path(self):
+        
+        if len(self.picked_pts) > 0:
+            print('You have unstacked picked pts. Stack them first by press f/g.')
+            print('Do nothing.')
+            return
 
         print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices()
@@ -278,7 +298,15 @@ class GUI:
         self.save()
 
 
-    def clear_pts(self):
+    def clear_last_pt(self):
+        print('Clear the last picked point')
+        if len(self.picked_pts) > 0:
+            self.plt.remove(self.picked_pts[-1]['name'])
+            self.picked_pts.pop()
+            self.plt.render()
+
+
+    def clear_all_pts(self):
         print('Clear the picked points')
         
         for pt in self.picked_pts:
@@ -330,7 +358,7 @@ class GUI:
 
         write(self.mesh, obj_path)
 
-        self.clear_pts()
+        self.clear_all_pts()
 
 
 if __name__ == '__main__':
@@ -348,7 +376,8 @@ if __name__ == '__main__':
         'Mouse left-click to pick vertex.\n' \
         'Press v/g to stack Geodesic path/loop.\n' \
         'Press z to compute Geodesic path/loop.\n' \
-        'Press c to clear the picked points.\n' \
+        'Press b to clear the LAST picked points.\n' \
+        'Press c to clear ALL picked points.\n' \
         'Press d to load the last segmentations.\n' \
         'Press m to toggle patch merging mode.\n' \
         'Press h to see more help and default features.'
