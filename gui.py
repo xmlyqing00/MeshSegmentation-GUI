@@ -173,6 +173,7 @@ class GUI:
                 
         fid = self.tri_mesh.vertex_faces[pid][0]    
         patch_id = self.face_patches[fid]
+        print('Selected patch id', patch_id)
         if patch_id in self.patches_to_merge:
             print('This patch has been picked. Clear the selected patches.')
             self.patches_to_merge = []
@@ -217,20 +218,15 @@ class GUI:
         for group_idx, group in enumerate(self.mask):
 
             self.mesh.cellcolors[group] = cmap[group_idx % 20]
-            # # if group_idx == 0:
-            #     # print(self.mesh.cellcolors[group])
-            # if group_idx == 4:
-            #     self.mesh.cellcolors[group] = (255, 0, 0, 255)
-            #     f = self.tri_mesh.faces[group]
-            #     print('f', f)
-            #     v = self.tri_mesh.vertices[f]
-            #     print('v', v)
-                
-            # else:
-            #     self.mesh.cellcolors[group] = (0, 0, 0, 0)
-            #     print('group_idx', group_idx, self.mesh.cellcolors[group[0]])
 
-        
+            # For debugging
+            # if group_idx == 9:
+            #     for fid in group:
+            #         pos = self.tri_mesh.vertices[self.tri_mesh.faces[fid][0]]
+            #         print(pos)
+            #         f_vis = Sphere(pos, r=self.point_size * 2, c='black')
+            #         self.plt.add(f_vis)
+           
         self.plt.remove(self.arrow_objs)
         self.arrow_objs = []
         for eid, edge in enumerate(list(self.boundary_edges)):
