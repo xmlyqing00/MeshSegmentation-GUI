@@ -182,7 +182,7 @@ class GUI:
         if len(self.patches_to_merge) < 2:
             return
         
-        self.mask_history.append(self.mask)
+        self.mask_history.append(self.mask.copy())
         self.tri_mesh_history.append(self.tri_mesh)
         print('Merge two patches', self.patches_to_merge)
 
@@ -324,6 +324,7 @@ class GUI:
     def load_last_mask(self):
         
         if len(self.mask_history) > 0:
+            print(len(self.mask_history[-1]))
             self.tri_mesh = self.tri_mesh_history.pop()
             self.mask = self.mask_history.pop()
             old_mesh = self.mesh
