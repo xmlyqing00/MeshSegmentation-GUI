@@ -1,7 +1,6 @@
 import numpy as np
 import trimesh
 from vedo import Mesh
-import queue
 import networkx as nx
 
 

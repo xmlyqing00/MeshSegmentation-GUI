@@ -1,4 +1,5 @@
-pickle
+networkx
 numpy
 vedo
 potpourri3d
+pillow

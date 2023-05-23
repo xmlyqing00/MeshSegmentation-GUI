@@ -1,4 +1,3 @@
-import pickle
 import argparse
 import os
 import numpy as np
@@ -86,13 +85,12 @@ class GUI:
         pt = self.mesh.vertices()[pid]
 
         picked_pt = Sphere(pt, r=self.point_size, c='black')
-        picked_pt.name = f'pt_{len(self.picked_pts)}'
+        # picked_pt.name = f'pt_{len(self.picked_pts)}'
 
-        print(f'Picked a vertex on the mesh. ID: {picked_pt.name}, Vertex ID: {pid}. Position: {pt}')
         self.picked_pts.append({
             'pos': pt,
             'id': pid,
-            'name': picked_pt.name
+            'obj': picked_pt
         })
 
         self.plt.add(picked_pt).render()
@@ -219,9 +217,9 @@ class GUI:
         for group_idx, group in enumerate(self.mask):
 
             self.mesh.cellcolors[group] = cmap[group_idx % 20]
-            # if group_idx == 0:
-                # print(self.mesh.cellcolors[group])
-            # if group_idx == 72:
+            # # if group_idx == 0:
+            #     # print(self.mesh.cellcolors[group])
+            # if group_idx == 4:
             #     self.mesh.cellcolors[group] = (255, 0, 0, 255)
             #     f = self.tri_mesh.faces[group]
             #     print('f', f)
@@ -229,7 +227,7 @@ class GUI:
             #     print('v', v)
                 
             # else:
-            #     self.mesh.cellcolors[group] = (0, 0, 0, 255)
+            #     self.mesh.cellcolors[group] = (0, 0, 0, 0)
             #     print('group_idx', group_idx, self.mesh.cellcolors[group[0]])
 
         
@@ -303,7 +301,7 @@ class GUI:
     def clear_last_pt(self):
         print('Clear the last picked point')
         if len(self.picked_pts) > 0:
-            self.plt.remove(self.picked_pts[-1]['name'])
+            self.plt.remove(self.picked_pts[-1]['obj'])
             self.picked_pts.pop()
             self.plt.render()
 
@@ -312,12 +310,12 @@ class GUI:
         print('Clear the picked points')
         
         for pt in self.picked_pts:
-            self.plt.remove(pt['name'])
+            self.plt.remove(pt['obj'])
         self.picked_pts = []
 
         for picked_pts in self.all_picked_pts:
             for pt in picked_pts:
-                self.plt.remove(pt['name'])
+                self.plt.remove(pt['obj'])
         self.all_picked_pts = []
         
         self.plt.render()
