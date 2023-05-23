@@ -56,7 +56,7 @@ class GUI:
         ])
         self.thres_nearest_pt = 2e-2 * self.mesh_size.min()
         self.point_size = 1e-2 * self.mesh_size.min()
-        self.boundary_size = 1e-2 * self.mesh_size.min()
+        self.boundary_size = 5e-3 * self.mesh_size.max()
         self.shadow_dist = 0.2 * self.mesh_size.min()
 
         self.enable_shadow = False
@@ -158,7 +158,7 @@ class GUI:
         self.update_mesh_color()
 
         unique_edges = self.tri_mesh.edges[trimesh.grouping.group_rows(self.tri_mesh.edges_sorted, require_count=1)]
-        print('unique edges', unique_edges.shape)
+        print('Open Boundary edges', unique_edges.shape)
         self.boundary_pts.update(unique_edges.flatten().tolist())
 
 
@@ -219,6 +219,8 @@ class GUI:
         for group_idx, group in enumerate(self.mask):
 
             self.mesh.cellcolors[group] = cmap[group_idx % 20]
+            # if group_idx == 0:
+                # print(self.mesh.cellcolors[group])
             # if group_idx == 72:
             #     self.mesh.cellcolors[group] = (255, 0, 0, 255)
             #     f = self.tri_mesh.faces[group]
