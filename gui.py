@@ -3,7 +3,7 @@ import os
 import numpy as np
 import trimesh
 import json
-from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write, Line
+from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
 from mesh_tools import split_mesh, floodfill_label_mesh
 from PIL import Image
@@ -47,13 +47,14 @@ class GUI:
         self.tri_mesh_history = []
 
         self.mesh = mesh
-        
-        self.tri_mesh = trimesh.Trimesh(
-            mesh.vertices(), 
-            mesh.faces(),
-            process=False,
-            maintain_order=True
-        )
+        self.tri_mesh = utils.vedo2trimesh(mesh)
+        print('cell colors len in init', len(self.mesh.cellcolors))
+        # self.tri_mesh = trimesh.Trimesh(
+        #     mesh.vertices(), 
+        #     mesh.faces(),
+        #     process=False,
+        #     maintain_order=True
+        # )
         self.plt.add(self.mesh)
 
         self.mesh_size = np.array([
@@ -183,7 +184,7 @@ class GUI:
 
 
     def merge_patch(self, pid: int):
-                
+        
         fid = self.tri_mesh.vertex_faces[pid][0]    
         patch_id = self.face_patches[fid]
         print('Selected patch id', patch_id)
@@ -294,7 +295,9 @@ class GUI:
         self.tri_mesh_history.append(self.tri_mesh)
 
         self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
-        self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
+        self.mesh = utils.trimesh2vedo(self.tri_mesh)
+        print('cell colors len in compute', len(self.mesh.cellcolors))
+        # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
         if self.enable_shadow:
             self.mesh.add_shadow('z', -self.shadow_dist)
 
@@ -360,6 +363,7 @@ class GUI:
         os.makedirs(single_obj_dir, exist_ok=True)
 
         obj_path = os.path.join(single_obj_dir, f'{obj_name}.obj')
+        viz_obj_path = obj_path.replace('.obj', '_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
         print('Save to', obj_path, mask_path)
 
@@ -367,6 +371,15 @@ class GUI:
             json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
 
         write(self.mesh, obj_path)
+        write(self.mesh, viz_obj_path)
+
+        # mesh2 = self.tri_mesh.copy()
+        # print(mesh2.vertices.shape, mesh2.faces.shape, mesh2.visual.kind, len(mesh.cellcolors))
+        # # print(len(self.mesh.vertices()), len(self.mesh.faces()))
+        # mesh2.visual = trimesh.visual.create_visual(
+        #     face_colors=self.mesh.cellcolors,
+        #     mesh=mesh2)
+        # mesh2.export(os.path.join(self.output_dir, f'{obj_name}.ply'))
 
     #     self.tri_mesh.visual.vertex_colors = cmap[patch_idx]
     # print(tri_mesh.visual)
