@@ -19,10 +19,18 @@ class NpEncoder(json.JSONEncoder):
 
 class GUI:
 
-    def __init__(self, mesh: Mesh, output_dir: str, plt: Plotter, mask: list = None) -> None:
+    def __init__(
+            self, 
+            mesh: Mesh, 
+            output_dir: str, 
+            plt: Plotter, 
+            mask: list = None,
+            close_point_merging: bool = True,
+        ) -> None:
         
         self.loop_flag = True
         self.merge_mode = False
+        self.close_point_merging = close_point_merging
 
         self.plt = plt
         self.output_dir = output_dir
@@ -58,6 +66,9 @@ class GUI:
         self.boundary_size = 5e-3 * self.mesh_size.max()
         self.shadow_dist = 0.2 * self.mesh_size.min()
 
+        if not self.close_point_merging:
+            self.point_size *= 0.1
+
         self.enable_shadow = False
         if self.enable_shadow:
             self.mesh.add_shadow('z', -self.shadow_dist)
@@ -80,7 +91,9 @@ class GUI:
             self.merge_patch(pid)       
             return 
         
-        mouse_pt = self.check_nearest_point(mouse_pt)
+        if self.close_point_merging:
+            mouse_pt = self.check_nearest_point(mouse_pt)
+
         pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
         pt = self.mesh.vertices()[pid]
 
@@ -162,8 +175,8 @@ class GUI:
 
     def toggle_merge_mode(self):
         self.merge_mode = not self.merge_mode
+        self.patches_to_merge = []
         if self.merge_mode:
-            self.patches_to_merge = []
             print('Merge mode on.')
         else:
             print('Merge mode off.')
@@ -355,6 +368,16 @@ class GUI:
 
         write(self.mesh, obj_path)
 
+    #     self.tri_mesh.visual.vertex_colors = cmap[patch_idx]
+    # print(tri_mesh.visual)
+    # print(tri_mesh.visual.kind)
+
+    # out_dir = 'output/skirt_8pieces/'
+    # os.makedirs(out_dir, exist_ok=True)
+    # out_path = os.path.join(out_dir, f'{patch_idx}.obj')
+    # print('Save to', out_path)
+    # tri_mesh.export(out_path)
+
         self.clear_all_pts()
 
 
@@ -363,7 +386,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Segmentation GUI')
     parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
     parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
-    parser.add_argument('--outdir', type=str, default='./output', help='Output path.')
+    parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
+    parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
     args = parser.parse_args()
 
     print(args)
@@ -398,8 +422,13 @@ if __name__ == '__main__':
         with open(args.mask, 'r') as f:
             mask = json.load(f)
 
-    plt = Plotter(axes=0, bg='white', size=(1200, 800))
-    gui = GUI(mesh, output_dir, plt, mask)  
+    plt = Plotter(axes=8, bg='white', size=(1200, 800))
+    if args.no_close_point_merging:
+        close_point_merging = False
+    else:
+        close_point_merging = True
+
+    gui = GUI(mesh, output_dir, plt, mask, close_point_merging)  
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)
