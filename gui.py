@@ -3,6 +3,7 @@ import os
 import numpy as np
 import trimesh
 import json
+import networkx as nx
 from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
 from mesh_tools import split_mesh, floodfill_label_mesh
@@ -21,7 +22,7 @@ class GUI:
 
     def __init__(
             self, 
-            mesh: Mesh, 
+            tri_mesh: trimesh.Trimesh, 
             output_dir: str, 
             plt: Plotter, 
             mask: list = None,
@@ -37,7 +38,7 @@ class GUI:
         if mask:
             self.mask = mask
         else:
-            self.mask = [[np.arange(len(mesh.faces()))]]
+            self.mask = [np.arange(len(tri_mesh.faces))]
     
         self.picked_pts = []
         self.all_picked_pts = []
@@ -46,8 +47,10 @@ class GUI:
         self.mask_history = []
         self.tri_mesh_history = []
 
-        self.mesh = mesh
-        self.tri_mesh = utils.vedo2trimesh(mesh)
+        if 'ColorVisuals' not in str(type(tri_mesh.visual)):
+            tri_mesh.visual = tri_mesh.visual.to_color()
+        self.mesh = utils.trimesh2vedo(tri_mesh)
+        self.tri_mesh = tri_mesh
         print('cell colors len in init', len(self.mesh.cellcolors))
         # self.tri_mesh = trimesh.Trimesh(
         #     mesh.vertices(), 
@@ -85,11 +88,11 @@ class GUI:
         if mouse_pt is None:
             return
         
-        pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
-        print('Mouse click:', mouse_pt, 'Vertex ID:', pid)
+        # pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
+        print('Mouse click:', mouse_pt)
 
         if self.merge_mode:
-            self.merge_patch(pid)       
+            self.merge_patch(mouse_pt)       
             return 
         
         if self.close_point_merging:
@@ -114,6 +117,8 @@ class GUI:
 
         if event.keypress == 'v' or event.keypress == 'g':
             self.stack_picked_pts(event.keypress == 'g')
+        elif event.keypress == 's':
+            self.compute_shortest_path()
         elif event.keypress == 'z':
             self.compute_geodesic_path()
         elif event.keypress == 'b':
@@ -128,18 +133,18 @@ class GUI:
     
     def update_mask(self):
         
-        picked_pt_pos = []
-        for picked_pts in self.all_picked_pts:
-            picked_pt_pos.append([x['pos'] for x in picked_pts])
+        picked_pt_pid = []
+        for picked_pts in self.all_picked_pts: 
+            picked_pt_pid.append(
+                [self.mesh.closest_point(x['pos'], return_point_id=True) for x in picked_pts]
+            )
 
-        if len(picked_pt_pos) > 0:
+        if len(picked_pt_pid) > 0:
         
             self.mask = floodfill_label_mesh(
-                self.mesh, 
+                self.tri_mesh, 
                 self.boundary_edges,
-                picked_pt_pos, 
-                self.tri_mesh.face_adjacency,
-                self.tri_mesh.face_adjacency_edges
+                picked_pt_pid, 
             )
 
             self.apply_mask()
@@ -149,11 +154,19 @@ class GUI:
 
     def apply_mask(self):
 
-        self.face_patches = np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
+        self.face_patches = -1 + np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
         for i, seg in enumerate(self.mask):
             print('patch_size:', i, len(seg))
             for fid in seg:
                 self.face_patches[fid] = i
+        
+        group_num = len(self.mask)
+        for i in range(len(self.face_patches)):
+            if self.face_patches[i] == -1:
+                print('Found a single face. Face id:', i)
+                self.face_patches[i] = group_num
+                group_num += 1
+                self.mask.append([i])
 
         f_adj = self.tri_mesh.face_adjacency
         fe_adj = np.sort(self.tri_mesh.face_adjacency_edges, axis=1)
@@ -183,9 +196,12 @@ class GUI:
             print('Merge mode off.')
 
 
-    def merge_patch(self, pid: int):
+    def merge_patch(self, mouse_pt: list):
         
-        fid = self.tri_mesh.vertex_faces[pid][0]    
+        fid = self.mesh.closest_point(mouse_pt, return_cell_id=True)
+        print('Selected face id', fid)
+        # fid = trimesh.proximity.nearby_faces(self.tri_mesh, mouse_pt)
+        # fid = self.tri_mesh.vertex_faces[pid][0]    
         patch_id = self.face_patches[fid]
         print('Selected patch id', patch_id)
         if patch_id in self.patches_to_merge:
@@ -267,6 +283,49 @@ class GUI:
 
         self.all_picked_pts.append(self.picked_pts)
         self.picked_pts = []
+
+
+    def compute_shortest_path(self):
+        
+        if len(self.picked_pts) > 0:
+            print('You have unstacked picked pts. Stack them first by press f/g.')
+            print('Do nothing.')
+            return
+
+        print('Compute the shortest path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
+        
+        # graph = nx.from_edgelist(self.tri_mesh.edges_unique)
+        
+        # path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
+
+        # new_pts = []
+        # for picked_pts in self.all_picked_pts:
+        #     for i in range(1, len(picked_pts)):
+        #         v_start = picked_pts[i - 1]['id']
+        #         v_end = picked_pts[i]['id']
+        #         path_pts = nx.shortest_path(graph, v_start, v_end)
+        #         # path_pts = path_solver.find_geodesic_path(v_start, v_end)
+        #         # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
+        #         new_pts.extend(path_pts[1:-1])
+
+        old_mesh = self.mesh
+        self.mask_history.append(self.mask)
+        self.tri_mesh_history.append(self.tri_mesh)
+
+        # self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
+        # self.mesh = utils.trimesh2vedo(self.tri_mesh)
+        # print('cell colors len in compute', len(self.mesh.cellcolors))
+        # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
+        if self.enable_shadow:
+            self.mesh.add_shadow('z', -self.shadow_dist)
+
+        self.apply_mask()
+        self.update_mask()
+        self.plt.remove(old_mesh)
+        self.plt.add(self.mesh)
+
+        self.plt.render()
+        self.save()
 
 
     def compute_geodesic_path(self):
@@ -410,6 +469,7 @@ if __name__ == '__main__':
         'Mouse left-click to pick vertex.\n' \
         'Press v/g to stack Geodesic path/loop.\n' \
         'Press z to compute Geodesic path/loop.\n' \
+        'Press s to compute Shortest path/loop (no new nodes).\n' \
         'Press b to clear the LAST picked points.\n' \
         'Press c to clear ALL picked points.\n' \
         'Press d to load the last segmentations.\n' \
@@ -424,7 +484,7 @@ if __name__ == '__main__':
         cmap.append(color_img[20, c])
 
     # Load the OBJ file
-    mesh = load(args.input)
+    tri_mesh = trimesh.load(args.input, maintain_order=True, process=False)
     obj_name = os.path.basename(args.input).split('.')[0]
     output_dir = os.path.join(args.outdir, obj_name)
     os.makedirs(args.outdir, exist_ok=True)
@@ -441,7 +501,7 @@ if __name__ == '__main__':
     else:
         close_point_merging = True
 
-    gui = GUI(mesh, output_dir, plt, mask, close_point_merging)  
+    gui = GUI(tri_mesh, output_dir, plt, mask, close_point_merging)  
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)

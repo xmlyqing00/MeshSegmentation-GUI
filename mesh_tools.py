@@ -185,25 +185,36 @@ def split_mesh(mesh, path_pts, face_patches):
 
 
 def floodfill_label_mesh(
-    mesh: Mesh, 
+    tri_mesh: trimesh.Trimesh, 
     boundary_edges: set,
-    all_picked_pt_pos: list, 
-    face_adjacency: list,
-    face_adjacency_edges: list
+    all_picked_pt_pid: list, 
 ):
     
-    face_adjacency_edges = np.sort(face_adjacency_edges, axis=1)
-    for picked_pt_pos in all_picked_pt_pos:
-        for i in range(1, len(picked_pt_pos)):
-            geodesic_mesh = mesh.geodesic(picked_pt_pos[i - 1], picked_pt_pos[i])
-            geodesic_vertices = geodesic_mesh.vertices()
-            for i in range(1, len(geodesic_vertices)):
-                v0 = mesh.closest_point(geodesic_vertices[i - 1], return_point_id=True)
-                v1 = mesh.closest_point(geodesic_vertices[i], return_point_id=True)
-                boundary_edges.add((min(v0, v1), max(v0, v1)))
+    face_adjacency = tri_mesh.face_adjacency
+    face_adjacency_edges = tri_mesh.face_adjacency_edges
 
     assert len(face_adjacency) == len(face_adjacency_edges)
 
+    edge_attributes = [
+        (tri_mesh.edges_unique[i][0], tri_mesh.edges_unique[i][1], {'weight': tri_mesh.edges_unique_length[i]})
+        for i in range(len(tri_mesh.edges_unique_length))
+    ]
+    graph = nx.from_edgelist(edge_attributes)
+    
+    for picked_pt_pid in all_picked_pt_pid:
+        for i in range(1, len(picked_pt_pid)):
+            path_pts = nx.shortest_path(
+                graph, 
+                picked_pt_pid[i - 1], 
+                picked_pt_pid[i], 
+                weight='weight'
+            )
+            for i in range(1, len(path_pts)):
+                v0 = path_pts[i - 1]
+                v1 = path_pts[i]
+                boundary_edges.add((min(v0, v1), max(v0, v1)))   
+
+    face_adjacency_edges = np.sort(face_adjacency_edges, axis=1)
     face_adjacency_valid = []
     for i in range(len(face_adjacency_edges)):
         if tuple(face_adjacency_edges[i].tolist()) not in boundary_edges:
