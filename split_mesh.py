@@ -2,7 +2,7 @@ import argparse
 import trimesh
 import os
 import json
-
+import subprocess
 
 if __name__ == '__main__':
 
@@ -35,3 +35,7 @@ if __name__ == '__main__':
         sub_mesh_path = os.path.join(output_dir, f'sub_mesh_{sub_idx:03d}.off')
         sub_mesh.export(sub_mesh_path)
         
+        program_name = '/mnt/e/Sources/NeuralImplicitBases/CGAL-5.6/examples/Surface_mesh_parameterization/build/discrete_conformal'
+        input_name = sub_mesh_path
+        output_name = sub_mesh_path.replace('sub_mesh', 'sub_mesh_2d')
+        subprocess.run(f'{program_name} {input_name} {output_name}')
