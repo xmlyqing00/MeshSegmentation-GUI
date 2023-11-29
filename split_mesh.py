@@ -3,6 +3,7 @@ import trimesh
 import os
 import json
 import subprocess
+import time
 
 if __name__ == '__main__':
 
@@ -16,7 +17,7 @@ if __name__ == '__main__':
 
     tri_mesh = trimesh.load(args.input, maintain_order=True, process=False)
     obj_name = os.path.basename(args.input).split('.')[0]
-    output_dir = os.path.join(args.outdir, obj_name)
+    output_dir = os.path.join(args.outdir, obj_name, 'sub_mesh')
     os.makedirs(output_dir, exist_ok=True)
 
     # Try to load the mask
@@ -32,10 +33,16 @@ if __name__ == '__main__':
         
         print(sub_mesh)
         
-        sub_mesh_path = os.path.join(output_dir, f'sub_mesh_{sub_idx:03d}.off')
+        sub_mesh_path = os.path.join(output_dir, f'mesh_{sub_idx:03d}.off')
         sub_mesh.export(sub_mesh_path)
+
+    # while not os.path.exists(sub_mesh_path):
+    #     time.sleep(1)
+
+    for sub_idx, sub_mesh in enumerate(sub_mesh_list):
         
+        sub_mesh_path = os.path.join(output_dir, f'mesh_{sub_idx:03d}.off')
         program_name = '/mnt/e/Sources/NeuralImplicitBases/CGAL-5.6/examples/Surface_mesh_parameterization/build/discrete_conformal'
         input_name = sub_mesh_path
-        output_name = sub_mesh_path.replace('sub_mesh', 'sub_mesh_2d')
-        subprocess.run(f'{program_name} {input_name} {output_name}')
+        output_name = sub_mesh_path.replace('mesh_', 'mesh_2d_')
+        subprocess.run([program_name, input_name, output_name])
