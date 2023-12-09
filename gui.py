@@ -4,7 +4,7 @@ import numpy as np
 import trimesh
 import json
 import networkx as nx
-from vedo import load, Plotter, Sphere, Arrow, Text2D, Mesh, write, Line, utils
+from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
 from mesh_tools import split_mesh, floodfill_label_mesh
 from PIL import Image
@@ -47,17 +47,9 @@ class GUI:
         self.mask_history = []
         self.tri_mesh_history = []
 
-        if 'ColorVisuals' not in str(type(tri_mesh.visual)):
-            tri_mesh.visual = tri_mesh.visual.to_color()
-        self.mesh = utils.trimesh2vedo(tri_mesh)
-        self.tri_mesh = tri_mesh
-        print('cell colors len in init', len(self.mesh.cellcolors))
-        # self.tri_mesh = trimesh.Trimesh(
-        #     mesh.vertices(), 
-        #     mesh.faces(),
-        #     process=False,
-        #     maintain_order=True
-        # )
+        tmp_tri_mesh = trimesh.Trimesh(tri_mesh.vertices, tri_mesh.faces, process=False, validate=False)
+        self.mesh = utils.trimesh2vedo(tmp_tri_mesh)
+        self.tri_mesh = tri_mesh.copy()
         self.plt.add(self.mesh)
 
         self.mesh_size = np.array([
@@ -71,7 +63,7 @@ class GUI:
         self.shadow_dist = 0.2 * self.mesh_size.min()
 
         if not self.close_point_merging:
-            self.point_size *= 0.1
+            self.point_size *= 0.05
 
         self.enable_shadow = False
         if self.enable_shadow:
@@ -88,7 +80,6 @@ class GUI:
         if mouse_pt is None:
             return
         
-        # pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
         print('Mouse click:', mouse_pt)
 
         if self.merge_mode:
@@ -102,7 +93,6 @@ class GUI:
         pt = self.mesh.vertices()[pid]
 
         picked_pt = Sphere(pt, r=self.point_size, c='black')
-        # picked_pt.name = f'pt_{len(self.picked_pts)}'
 
         self.picked_pts.append({
             'pos': pt,
@@ -200,8 +190,6 @@ class GUI:
         
         fid = self.mesh.closest_point(mouse_pt, return_cell_id=True)
         print('Selected face id', fid)
-        # fid = trimesh.proximity.nearby_faces(self.tri_mesh, mouse_pt)
-        # fid = self.tri_mesh.vertex_faces[pid][0]    
         patch_id = self.face_patches[fid]
         print('Selected patch id', patch_id)
         if patch_id in self.patches_to_merge:
@@ -246,21 +234,11 @@ class GUI:
     def update_mesh_color(self):
 
         for group_idx, group in enumerate(self.mask):
-
             self.mesh.cellcolors[group] = cmap[group_idx % 20]
-
-            # For debugging
-            # if group_idx == 9:
-            #     for fid in group:
-            #         pos = self.tri_mesh.vertices[self.tri_mesh.faces[fid][0]]
-            #         print(pos)
-            #         f_vis = Sphere(pos, r=self.point_size * 2, c='black')
-            #         self.plt.add(f_vis)
            
         self.plt.remove(self.arrow_objs)
         self.arrow_objs = []
         for eid, edge in enumerate(list(self.boundary_edges)):
-            # arrow = Arrow(path_pts[path_id - 1], path_pts[path_id], s=self.boundary_size, c='black')
             arrow = Line(
                 self.tri_mesh.vertices[edge[0]],
                 self.tri_mesh.vertices[edge[1]],
@@ -275,7 +253,7 @@ class GUI:
     def stack_picked_pts(self, loop_flag: bool = False):
         print('Stack picekd pts. Loop:', loop_flag)
         if len(self.picked_pts) < 2:
-            print('The number of the picked points is less than 2.')
+            print('The number of the picked points must be larger than 2.')
             return
 
         if loop_flag:
@@ -293,29 +271,11 @@ class GUI:
             return
 
         print('Compute the shortest path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
-        
-        # graph = nx.from_edgelist(self.tri_mesh.edges_unique)
-        
-        # path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
-
-        # new_pts = []
-        # for picked_pts in self.all_picked_pts:
-        #     for i in range(1, len(picked_pts)):
-        #         v_start = picked_pts[i - 1]['id']
-        #         v_end = picked_pts[i]['id']
-        #         path_pts = nx.shortest_path(graph, v_start, v_end)
-        #         # path_pts = path_solver.find_geodesic_path(v_start, v_end)
-        #         # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
-        #         new_pts.extend(path_pts[1:-1])
 
         old_mesh = self.mesh
         self.mask_history.append(self.mask)
         self.tri_mesh_history.append(self.tri_mesh)
 
-        # self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
-        # self.mesh = utils.trimesh2vedo(self.tri_mesh)
-        # print('cell colors len in compute', len(self.mesh.cellcolors))
-        # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
         if self.enable_shadow:
             self.mesh.add_shadow('z', -self.shadow_dist)
 
@@ -338,6 +298,7 @@ class GUI:
         print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices()
         f = np.array(self.mesh.faces())
+        print(v.shape, f.shape)
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         new_pts = []
@@ -345,6 +306,7 @@ class GUI:
             for i in range(1, len(picked_pts)):
                 v_start = picked_pts[i - 1]['id']
                 v_end = picked_pts[i]['id']
+                print(v_start, v_end)
                 path_pts = path_solver.find_geodesic_path(v_start, v_end)
                 # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
                 new_pts.extend(path_pts[1:-1])
@@ -421,34 +383,18 @@ class GUI:
         single_obj_dir = os.path.join(self.output_dir, 'single')
         os.makedirs(single_obj_dir, exist_ok=True)
 
-        obj_path = os.path.join(single_obj_dir, f'{obj_name}.obj')
-        viz_obj_path = obj_path.replace('.obj', '_viz.ply')
+        obj_path = os.path.join(single_obj_dir, f'{obj_name}.ply')
+        viz_obj_path = os.path.join(single_obj_dir, f'{obj_name}_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
-        print('Save to', obj_path, mask_path)
+        print('Save to', obj_path, viz_obj_path, mask_path)
 
         with open(mask_path, 'w') as f:
             json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
 
-        write(self.mesh, obj_path)
+        self.tri_mesh.export(obj_path)
+        # self.tri_mesh.export(obj_path, file_type='ply', encoding='ascii')
+        # write(self.mesh, obj_path)
         write(self.mesh, viz_obj_path)
-
-        # mesh2 = self.tri_mesh.copy()
-        # print(mesh2.vertices.shape, mesh2.faces.shape, mesh2.visual.kind, len(mesh.cellcolors))
-        # # print(len(self.mesh.vertices()), len(self.mesh.faces()))
-        # mesh2.visual = trimesh.visual.create_visual(
-        #     face_colors=self.mesh.cellcolors,
-        #     mesh=mesh2)
-        # mesh2.export(os.path.join(self.output_dir, f'{obj_name}.ply'))
-
-    #     self.tri_mesh.visual.vertex_colors = cmap[patch_idx]
-    # print(tri_mesh.visual)
-    # print(tri_mesh.visual.kind)
-
-    # out_dir = 'output/skirt_8pieces/'
-    # os.makedirs(out_dir, exist_ok=True)
-    # out_path = os.path.join(out_dir, f'{patch_idx}.obj')
-    # print('Save to', out_path)
-    # tri_mesh.export(out_path)
 
         self.clear_all_pts()
 
@@ -467,9 +413,9 @@ if __name__ == '__main__':
     msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
     msg.text(
         'Mouse left-click to pick vertex.\n' \
-        'Press v/g to stack Geodesic path/loop.\n' \
+        'Press v/g to stack path/loop of picked vertices.\n' \
         'Press z to compute Geodesic path/loop.\n' \
-        'Press s to compute Shortest path/loop (no new nodes).\n' \
+        'Press s to compute Shortest path/loop (no new vertex).\n' \
         'Press b to clear the LAST picked points.\n' \
         'Press c to clear ALL picked points.\n' \
         'Press d to load the last segmentations.\n' \
@@ -484,7 +430,8 @@ if __name__ == '__main__':
         cmap.append(color_img[20, c])
 
     # Load the OBJ file
-    tri_mesh = trimesh.load(args.input, maintain_order=True, process=False)
+    tri_mesh = trimesh.load(args.input, maintain_order=True, process=False, fix_texture=False, validate=False)
+    print(tri_mesh.vertices.shape, tri_mesh.faces.shape)
     obj_name = os.path.basename(args.input).split('.')[0]
     output_dir = os.path.join(args.outdir, obj_name)
     os.makedirs(args.outdir, exist_ok=True)
@@ -502,6 +449,7 @@ if __name__ == '__main__':
         close_point_merging = True
 
     gui = GUI(tri_mesh, output_dir, plt, mask, close_point_merging)  
+    gui.save()
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)
