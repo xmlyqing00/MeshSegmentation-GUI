@@ -215,10 +215,10 @@ class GUI:
         dist = np.linalg.norm(boundary_pts - mouse_pt, axis=1)
         idx = np.argmin(dist)
         if dist[idx] < self.thres_nearest_pt:
-            logger.info('Found nearest existing pt: {boundary_pts[idx]}. Distance: {dist[idx]}')
+            logger.info(f'Found nearest existing pt: {boundary_pts[idx]}. Distance: {dist[idx]}')
             return boundary_pts[idx]
         else:
-            logger.info('The nearest existing pt is too far. Distance: {dist[idx]}')
+            logger.info(f'The nearest existing pt is too far. Distance: {dist[idx]}')
             return mouse_pt
 
 
@@ -365,14 +365,13 @@ class GUI:
 
 
     def save(self):
-        
 
         obj_name = os.path.basename(self.output_dir)
         single_obj_dir = os.path.join(self.output_dir, 'single')
         os.makedirs(single_obj_dir, exist_ok=True)
 
         obj_path = os.path.join(single_obj_dir, f'{obj_name}.ply')
-        viz_obj_path = os.path.join(single_obj_dir, f'{obj_name}_viz.ply')
+        viz_obj_path = os.path.join(self.output_dir, f'{obj_name}_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
 
         with open(mask_path, 'w') as f:
@@ -383,7 +382,7 @@ class GUI:
 
         self.clear_all_pts()
 
-        logger.success(f'Saved mask and mesh to {single_obj_dir}.')
+        logger.success(f'Saved mask and mesh to {self.output_dir}.')
         logger.info('Ready for the next segmentation.')
 
 
@@ -424,6 +423,7 @@ if __name__ == '__main__':
     obj_name = os.path.basename(args.input).split('.')[0]
     output_dir = os.path.join(args.outdir, obj_name)
     os.makedirs(args.outdir, exist_ok=True)
+    logger.info(f'Output directory: {output_dir}.')
 
     # Try to load the mask
     mask = None

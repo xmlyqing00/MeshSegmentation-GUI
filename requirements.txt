@@ -3,3 +3,4 @@ numpy
 vedo
 potpourri3d
 pillow
+loguru
