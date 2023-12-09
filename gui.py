@@ -3,19 +3,12 @@ import os
 import numpy as np
 import trimesh
 import json
-import networkx as nx
+from loguru import logger
 from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
-from mesh_tools import split_mesh, floodfill_label_mesh
+from src.utils import NpEncoder
+from src.mesh_tools import split_mesh, floodfill_label_mesh
 from PIL import Image
-
-
-class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
 
 
 class GUI:
@@ -80,7 +73,7 @@ class GUI:
         if mouse_pt is None:
             return
         
-        print('Mouse click:', mouse_pt)
+        logger.debug(f'Mouse click: {mouse_pt}')
 
         if self.merge_mode:
             self.merge_patch(mouse_pt)       
@@ -146,14 +139,13 @@ class GUI:
 
         self.face_patches = -1 + np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
         for i, seg in enumerate(self.mask):
-            print('patch_size:', i, len(seg))
             for fid in seg:
                 self.face_patches[fid] = i
         
         group_num = len(self.mask)
         for i in range(len(self.face_patches)):
             if self.face_patches[i] == -1:
-                print('Found a single face. Face id:', i)
+                logger.info(f'Found a single face. Face id: {i}')
                 self.face_patches[i] = group_num
                 group_num += 1
                 self.mask.append([i])
@@ -169,11 +161,11 @@ class GUI:
                 self.boundary_pts.add(fe_adj[i][1])
                 self.boundary_edges.add((fe_adj[i][0], fe_adj[i][1]))
         
-        print('Patch number', len(self.mask))
+        logger.info(f'Patch number: {len(self.mask)}')
         self.update_mesh_color()
 
         unique_edges = self.tri_mesh.edges[trimesh.grouping.group_rows(self.tri_mesh.edges_sorted, require_count=1)]
-        print('Open Boundary edges', unique_edges.shape)
+        logger.info(f'Edge number of open boundary: {unique_edges.shape[0]}')
         self.boundary_pts.update(unique_edges.flatten().tolist())
 
 
@@ -181,19 +173,18 @@ class GUI:
         self.merge_mode = not self.merge_mode
         self.patches_to_merge = []
         if self.merge_mode:
-            print('Merge mode on.')
+            logger.info('Merge mode on.')
         else:
-            print('Merge mode off.')
+            logger.info('Merge mode off.')
 
 
     def merge_patch(self, mouse_pt: list):
         
         fid = self.mesh.closest_point(mouse_pt, return_cell_id=True)
-        print('Selected face id', fid)
         patch_id = self.face_patches[fid]
-        print('Selected patch id', patch_id)
+        logger.info(f'Selected face id {fid}. patch id {patch_id}')
         if patch_id in self.patches_to_merge:
-            print('This patch has been picked. Clear the selected patches.')
+            logger.warning('This patch has been picked. Clear the selected patches.')
             self.patches_to_merge = []
             return
         
@@ -203,7 +194,7 @@ class GUI:
         
         self.mask_history.append(self.mask.copy())
         self.tri_mesh_history.append(self.tri_mesh)
-        print('Merge two patches', self.patches_to_merge)
+        logger.success(f'Merge two patches {self.patches_to_merge}')
 
         patch_id0 = self.patches_to_merge[0]
         patch_id1 = self.patches_to_merge[1]
@@ -224,10 +215,10 @@ class GUI:
         dist = np.linalg.norm(boundary_pts - mouse_pt, axis=1)
         idx = np.argmin(dist)
         if dist[idx] < self.thres_nearest_pt:
-            print('Find nearest existing pt:', boundary_pts[idx], 'Distance:', dist[idx])
+            logger.info('Found nearest existing pt: {boundary_pts[idx]}. Distance: {dist[idx]}')
             return boundary_pts[idx]
         else:
-            print('The nearest existing pt is too far. Distance:', dist[idx])
+            logger.info('The nearest existing pt is too far. Distance: {dist[idx]}')
             return mouse_pt
 
 
@@ -251,9 +242,9 @@ class GUI:
             
 
     def stack_picked_pts(self, loop_flag: bool = False):
-        print('Stack picekd pts. Loop:', loop_flag)
+        logger.success('Stack picekd pts. Loop:', loop_flag)
         if len(self.picked_pts) < 2:
-            print('The number of the picked points must be larger than 2.')
+            logger.warning('The number of the picked points must be larger than 2.')
             return
 
         if loop_flag:
@@ -266,11 +257,10 @@ class GUI:
     def compute_shortest_path(self):
         
         if len(self.picked_pts) > 0:
-            print('You have unstacked picked pts. Stack them first by press f/g.')
-            print('Do nothing.')
+            logger.warning('You have unstacked picked pts. Stack them first by press f/g. Do nothing.')
             return
 
-        print('Compute the shortest path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
+        logger.success(f'Compute the SHORTEST path. Number of paths of picked pts: {len(self.all_picked_pts)}')
 
         old_mesh = self.mesh
         self.mask_history.append(self.mask)
@@ -291,14 +281,12 @@ class GUI:
     def compute_geodesic_path(self):
         
         if len(self.picked_pts) > 0:
-            print('You have unstacked picked pts. Stack them first by press f/g.')
-            print('Do nothing.')
+            logger.warning('You have unstacked picked pts. Stack them first by press f/g. Do nothing.')
             return
 
-        print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
+        logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices()
         f = np.array(self.mesh.faces())
-        print(v.shape, f.shape)
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         new_pts = []
@@ -306,7 +294,7 @@ class GUI:
             for i in range(1, len(picked_pts)):
                 v_start = picked_pts[i - 1]['id']
                 v_end = picked_pts[i]['id']
-                print(v_start, v_end)
+                # logger.debug(v_start, v_end)
                 path_pts = path_solver.find_geodesic_path(v_start, v_end)
                 # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
                 new_pts.extend(path_pts[1:-1])
@@ -317,7 +305,7 @@ class GUI:
 
         self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
         self.mesh = utils.trimesh2vedo(self.tri_mesh)
-        print('cell colors len in compute', len(self.mesh.cellcolors))
+        # print('cell colors len in compute', len(self.mesh.cellcolors))
         # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
         if self.enable_shadow:
             self.mesh.add_shadow('z', -self.shadow_dist)
@@ -332,7 +320,7 @@ class GUI:
 
 
     def clear_last_pt(self):
-        print('Clear the last picked point')
+        logger.success('Clear the last picked point')
         if len(self.picked_pts) > 0:
             self.plt.remove(self.picked_pts[-1]['obj'])
             self.picked_pts.pop()
@@ -340,7 +328,7 @@ class GUI:
 
 
     def clear_all_pts(self):
-        print('Clear the picked points')
+        logger.success('Clear the picked points')
         
         for pt in self.picked_pts:
             self.plt.remove(pt['obj'])
@@ -371,13 +359,13 @@ class GUI:
             self.plt.render()
             self.save()
 
-            print('Load the last mask. The number of history masks is', len(self.mask_history))
+            logger.success('Load the last mask. The number of history masks is', len(self.mask_history))
         else:
-            print('This is already the first patch mask.')
+            logger.warning('This is already the first patch mask.')
 
 
     def save(self):
-        print(f'Saved mask.json. Ready for the next segmentation.')
+        
 
         obj_name = os.path.basename(self.output_dir)
         single_obj_dir = os.path.join(self.output_dir, 'single')
@@ -386,17 +374,17 @@ class GUI:
         obj_path = os.path.join(single_obj_dir, f'{obj_name}.ply')
         viz_obj_path = os.path.join(single_obj_dir, f'{obj_name}_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
-        print('Save to', obj_path, viz_obj_path, mask_path)
 
         with open(mask_path, 'w') as f:
             json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
 
         self.tri_mesh.export(obj_path)
-        # self.tri_mesh.export(obj_path, file_type='ply', encoding='ascii')
-        # write(self.mesh, obj_path)
         write(self.mesh, viz_obj_path)
 
         self.clear_all_pts()
+
+        logger.success(f'Saved mask and mesh to {single_obj_dir}.')
+        logger.info('Ready for the next segmentation.')
 
 
 if __name__ == '__main__':
@@ -407,12 +395,10 @@ if __name__ == '__main__':
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
     args = parser.parse_args()
+    
 
-    print(args)
-
-    msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
-    msg.text(
-        'Mouse left-click to pick vertex.\n' \
+    logger.info(f'Arguments: {args}')
+    help_text = 'Mouse left-click to pick vertex.\n' \
         'Press v/g to stack path/loop of picked vertices.\n' \
         'Press z to compute Geodesic path/loop.\n' \
         'Press s to compute Shortest path/loop (no new vertex).\n' \
@@ -421,17 +407,20 @@ if __name__ == '__main__':
         'Press d to load the last segmentations.\n' \
         'Press m to toggle patch merging mode.\n' \
         'Press h to see more help and default features.'
-    )
+    logger.info(f'Keyboard shortcuts:\n{help_text}')
+
+    msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
+    msg.text(help_text)
 
     color_img = np.asarray(Image.open('assets/cm_tab20.png').convert('RGBA'))
     cmap = []
     for i in range(20):
         c = 25 * (i % 20) + 10
-        cmap.append(color_img[20, c])
+        cmap.append(color_img[20, c ])
 
     # Load the OBJ file
     tri_mesh = trimesh.load(args.input, maintain_order=True, process=False, fix_texture=False, validate=False)
-    print(tri_mesh.vertices.shape, tri_mesh.faces.shape)
+    logger.info(f'Mesh vertices and faces: {tri_mesh.vertices.shape}, {tri_mesh.faces.shape}')
     obj_name = os.path.basename(args.input).split('.')[0]
     output_dir = os.path.join(args.outdir, obj_name)
     os.makedirs(args.outdir, exist_ok=True)
@@ -439,6 +428,7 @@ if __name__ == '__main__':
     # Try to load the mask
     mask = None
     if args.mask and os.path.exists(args.mask):
+        logger.success(f'Load mask from {args.mask}')
         with open(args.mask, 'r') as f:
             mask = json.load(f)
 
@@ -449,7 +439,6 @@ if __name__ == '__main__':
         close_point_merging = True
 
     gui = GUI(tri_mesh, output_dir, plt, mask, close_point_merging)  
-    gui.save()
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)

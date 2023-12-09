@@ -81,8 +81,6 @@ def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_
     kept_face_ids = np.ones(len(mesh.faces))
     kept_face_ids[masked_face_ids] = 0
 
-    # print('masked_face_ids', masked_face_ids)
-
     faces_new = mesh.faces[masked_face_ids].tolist()
     face_patches_new = face_patches[masked_face_ids].tolist()
 
