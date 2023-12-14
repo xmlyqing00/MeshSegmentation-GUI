@@ -42,7 +42,6 @@ class GUI:
 
         tmp_tri_mesh = trimesh.Trimesh(tri_mesh.vertices, tri_mesh.faces, process=False, validate=False)
         self.mesh = utils.trimesh2vedo(tmp_tri_mesh)
-        self.tri_mesh = tri_mesh.copy()
         self.plt.add(self.mesh)
 
         self.mesh_size = np.array([
@@ -83,7 +82,7 @@ class GUI:
             mouse_pt = self.check_nearest_point(mouse_pt)
 
         pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
-        pt = self.mesh.vertices[pid]
+        pt = self.mesh.vertices()[pid]
 
         picked_pt = Sphere(pt, r=self.point_size, c='black')
 
