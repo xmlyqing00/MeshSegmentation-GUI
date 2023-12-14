@@ -221,7 +221,6 @@ class GUI:
             logger.info(f'The nearest existing pt is too far. Distance: {dist[idx]}')
             return mouse_pt
 
-
     def update_mesh_color(self):
 
         for group_idx, group in enumerate(self.mask):
@@ -367,10 +366,8 @@ class GUI:
     def save(self):
 
         obj_name = os.path.basename(self.output_dir)
-        single_obj_dir = os.path.join(self.output_dir, 'single')
-        os.makedirs(single_obj_dir, exist_ok=True)
 
-        obj_path = os.path.join(single_obj_dir, f'{obj_name}.ply')
+        obj_path = os.path.join(self.output_dir, f'{obj_name}.ply')
         viz_obj_path = os.path.join(self.output_dir, f'{obj_name}_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
 
@@ -393,10 +390,9 @@ if __name__ == '__main__':
     parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
-    args = parser.parse_args()
-    
-
+    args = parser.parse_args()    
     logger.info(f'Arguments: {args}')
+
     help_text = 'Mouse left-click to pick vertex.\n' \
         'Press v/g to stack path/loop of picked vertices.\n' \
         'Press z to compute Geodesic path/loop.\n' \
