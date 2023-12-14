@@ -3,6 +3,7 @@ import os
 import numpy as np
 import trimesh
 import json
+import datetime
 from loguru import logger
 from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
@@ -241,9 +242,10 @@ class GUI:
             
 
     def stack_picked_pts(self, loop_flag: bool = False):
-        logger.success('Stack picekd pts. Loop:', loop_flag)
+        stack_type = 'Loop' if loop_flag else 'Path'
+        logger.success(f'Stack picekd pts as {stack_type}')
         if len(self.picked_pts) < 2:
-            logger.warning('The number of the picked points must be larger than 2.')
+            logger.warning('The number of the picked points must be larger than 2. Do nothing.')
             return
 
         if loop_flag:
@@ -367,10 +369,8 @@ class GUI:
 
     def save(self):
 
-        obj_name = os.path.basename(self.output_dir)
-
-        obj_path = os.path.join(self.output_dir, f'{obj_name}.ply')
-        viz_obj_path = os.path.join(self.output_dir, f'{obj_name}_viz.ply')
+        obj_path = os.path.join(self.output_dir, 'segmented_mesh.ply')
+        viz_obj_path = os.path.join(self.output_dir, 'segmentation_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
 
         with open(mask_path, 'w') as f:
@@ -419,9 +419,15 @@ if __name__ == '__main__':
     tri_mesh = trimesh.load(args.input, maintain_order=True, process=False, fix_texture=False, validate=False)
     logger.info(f'Mesh vertices and faces: {tri_mesh.vertices.shape}, {tri_mesh.faces.shape}')
     obj_name = os.path.basename(args.input).split('.')[0]
-    output_dir = os.path.join(args.outdir, obj_name)
-    os.makedirs(args.outdir, exist_ok=True)
-    logger.info(f'Output directory: {output_dir}.')
+
+    # Create output directory
+    current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    output_dir = os.path.join(args.outdir, f'{obj_name}_{current_time}')
+    if os.path.exists(output_dir):
+        logger.warning(f'Output directory {output_dir} already exists. Will overwrite.')
+    else:
+        logger.info(f'Create output directory: {output_dir}.')
+        os.makedirs(output_dir)
 
     # Try to load the mask
     mask = None
