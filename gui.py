@@ -43,6 +43,7 @@ class GUI:
         tmp_tri_mesh = trimesh.Trimesh(tri_mesh.vertices, tri_mesh.faces, process=False, validate=False)
         self.mesh = utils.trimesh2vedo(tmp_tri_mesh)
         self.plt.add(self.mesh)
+        self.tri_mesh = tri_mesh.copy()
 
         self.mesh_size = np.array([
             self.tri_mesh.vertices[:, 0].max() - self.tri_mesh.vertices[:, 0].min(),
