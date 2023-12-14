@@ -83,7 +83,7 @@ class GUI:
             mouse_pt = self.check_nearest_point(mouse_pt)
 
         pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
-        pt = self.mesh.vertices()[pid]
+        pt = self.mesh.vertices[pid]
 
         picked_pt = Sphere(pt, r=self.point_size, c='black')
 
@@ -285,6 +285,8 @@ class GUI:
 
         logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices()
+        # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
+        # v = self.mesh.vertices
         f = np.array(self.mesh.faces())
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
@@ -386,7 +388,7 @@ class GUI:
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Segmentation GUI')
-    parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
+    parser.add_argument('--input', type=str, default='data/bimba_nf1M.obj', help='Input mesh path.')
     parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
