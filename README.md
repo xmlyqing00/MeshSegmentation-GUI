@@ -1,4 +1,4 @@
-# NeuralComplexMap-GUI
+# Mesh Segmentation Tool - GUI
 
 
 ## Environment
@@ -6,7 +6,18 @@
 pip install -r requirements.txt
 ```
 
-## Run GUI
+## Segmentation GUI
+```bash
+python gui.py --input <input_path>
 ```
-python gui.py
+![](assets/illustration-segmentation.png)
+
+## Texture Transferring
+```bash
+python transfer_texture.py --tex-mesh <tex_mesh_path> --new-mesh <new_mesh_path>
 ```
+![](assets/illustration-texture.png)
+
+## Auto Segmentation
+
+On going
