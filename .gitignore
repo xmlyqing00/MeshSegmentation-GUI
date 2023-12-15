@@ -6,3 +6,7 @@ __pycache__/
 
 output/
 data/
+output*
+
+*.obj
+*.ply
