@@ -84,7 +84,7 @@ class GUI:
             mouse_pt = self.check_nearest_point(mouse_pt)
 
         pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
-        pt = self.mesh.vertices()[pid]
+        pt = self.mesh.vertices[pid]
 
         picked_pt = Sphere(pt, r=self.point_size, c='black')
 
@@ -286,7 +286,7 @@ class GUI:
             return
 
         logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
-        v = self.mesh.vertices()
+        v = self.mesh.vertices
         # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
         # v = self.mesh.vertices
         f = np.array(self.mesh.faces())

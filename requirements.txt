@@ -1,6 +1,7 @@
-networkx
-numpy
-vedo
-potpourri3d
-pillow
-loguru
+networkx==3.1
+numpy==1.23.5
+vedo==2023.5.0
+potpourri3d==0.0.8
+pillow==9.4.0
+loguru==0.7.2
+libigl==2.5.0
