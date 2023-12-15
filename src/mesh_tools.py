@@ -222,3 +222,15 @@ def floodfill_label_mesh(
     groups = [list(x) for x in nx.connected_components(graph)]
 
     return groups
+
+def simple_floodfill_label_mesh(
+    mesh: trimesh.Trimesh, 
+    mask: list
+):  
+    mask = np.array(mask)
+    mask_connected = []
+    patch_mesh = trimesh.Trimesh(mesh.vertices, mesh.faces[mask,:], maintain_order=True, process=False)
+    out = trimesh.graph.connected_component_labels(patch_mesh.face_adjacency)
+    for i in range(out.max()+1):
+        mask_connected.append((mask[out==i]).tolist())
+    return mask_connected

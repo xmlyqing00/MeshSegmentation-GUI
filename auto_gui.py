@@ -8,10 +8,11 @@ from loguru import logger
 from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
 from potpourri3d import EdgeFlipGeodesicSolver
 from src.utils import NpEncoder
-from src.mesh_tools import split_mesh, floodfill_label_mesh
+from src.mesh_tools import split_mesh, floodfill_label_mesh, simple_floodfill_label_mesh
 from PIL import Image
 from view_psd_data import *
-from throughhole import tsp_segment
+from mesh_data_structure.halfedge_mesh import HETriMesh
+from throughhole import cut_through_holes, process_data, cut_annulus
 
 class GUI:
 
@@ -210,46 +211,63 @@ class GUI:
         self.save()
         
     def auto_segmentation(self):
-        pt = self.picked_pts[-1]['pos']
-        fid = self.mesh.closest_point(pt, return_cell_id=True)
-        patch_id = self.face_patches[fid]
-        logger.info(f'Selected face id {fid}. patch id {patch_id}')
-        
-        ## find patches with non-disk topology
-        ## consider all these patches connected to each other as a single patch
-        ## loop over these groups of "patches" with non-disk topology
-        ## segment each group
-        ## copy back the mask
+        logger.info(f'Automatic segmentation')
+        """
+        new idea:
+        1 get the mask of the mesh
+        2 get the boundary of each mask. These are the existing cuts
+        3 For each mask that has a disk topology, compute its centroid
+        4 Compute a TSP path that goes through all centroids
+        5 Cut the mesh along the TSP path and the existing cuts
+        """
 
-        ## get masked mesh
-        new_mask = self.mask[patch_id]
-        print(max(new_mask))
-        print(self.tri_mesh.vertices.shape, self.tri_mesh.faces.shape)
-        patch_mesh = trimesh.Trimesh(self.tri_mesh.vertices, self.tri_mesh.faces[np.array(new_mask),:])
-        cuts = tsp_segment(patch_mesh)
-        cut_pts = []
+        mask = self.mask
+        mesh = self.tri_mesh
+        merge_annulus = False
+
+
+        list_boundaries, non_disk_mask, annulus_mask = process_data(
+            mesh, mask, merge_annulus=False)
+        annulus_cuts = cut_annulus(mesh, annulus_mask)
+        throughhole_path = cut_through_holes(mesh, non_disk_mask)
+
+        self.boundary_edges = []
+        for i, boundaries in enumerate(list_boundaries):
+            for boundary in boundaries:
+                self.boundary_edges.extend(boundary)
 
         self.all_picked_pts = []
-        for cut in cuts:
+        cut_pts = []
+        for path in throughhole_path:
             picked_pts = []
-            cut_pts.extend(np.array(cut))
-            for pt in cut:
+            cut_pts.extend(np.array(path))
+            for pt in path:
+                # picked_pt = Sphere(pt, r=self.point_size, c='black')
+                # self.plt.add(picked_pt).render()
                 picked_pts.append({
                     'pos': pt,
                     'obj': None
                 })
             self.all_picked_pts.append(picked_pts)
-        cut_pts = np.array(cut_pts)
-
-        # for pt in cut_pts:
-        #     render_cut_pts = Sphere(pt, r=self.point_size, c='black')
-        #     self.plt.add(render_cut_pts).render()
+        print(len(cut_pts))
+        for path in annulus_cuts:
+            picked_pts = []
+            cut_pts.extend(np.array(path))
+            for pt in path:
+                # picked_pt = Sphere(pt, r=self.point_size, c='black')
+                # self.plt.add(picked_pt).render()
+                picked_pts.append({
+                    'pos': pt,
+                    'obj': None
+                })
+            self.all_picked_pts.append(picked_pts)
+        print(len(cut_pts))
 
         old_mesh = self.mesh
         self.mask_history.append(self.mask)
         self.tri_mesh_history.append(self.tri_mesh)
 
-        self.tri_mesh, self.mask = split_mesh(self.tri_mesh, cut_pts, self.face_patches)
+        self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(cut_pts), self.face_patches)
         self.mesh = utils.trimesh2vedo(self.tri_mesh)
         # print('cell colors len in compute', len(self.mesh.cellcolors))
         # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
@@ -495,13 +513,6 @@ if __name__ == '__main__':
     else:
         logger.info(f'Create output directory: {output_dir}.')
         os.makedirs(output_dir)
-
-    # # Try to load the mask
-    # mask = None
-    # if args.mask and os.path.exists(args.mask):
-    #     logger.success(f'Load mask from {args.mask}')
-    #     with open(args.mask, 'r') as f:
-    #         mask = json.load(f)
 
     plt = Plotter(axes=8, bg='white', size=(1200, 800))
     if args.no_close_point_merging:
