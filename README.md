@@ -1,4 +1,4 @@
-# NeuralComplexMap-GUI
+# Mesh Segmentation Tool - GUI
 
 
 ## Environment
@@ -17,3 +17,7 @@ python gui.py --input <input_path>
 python transfer_texture.py --tex-mesh <tex_mesh_path> --new-mesh <new_mesh_path>
 ```
 ![](assets/illustration-texture.png)
+
+## Auto Segmentation
+
+On going
