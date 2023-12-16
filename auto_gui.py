@@ -298,12 +298,13 @@ class GUI:
         builder.base.export(os.path.join(self.output_dir, "data/single", "mesh.obj"))
         with open(os.path.join(self.output_dir, "data", "mask.json"), 'w') as f:
             json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+            print(f"mask saved: {os.path.join(self.output_dir, 'data', 'mask.json')}")
         with open(os.path.join(self.output_dir, "data", "topology_graph.json"), 'w') as f:
             json.dump(graph, f, cls=NpEncoder, ensure_ascii=False, indent=4)
         with open(os.path.join(self.output_dir, "data", "cell_arc_lengths.json"), 'w') as f:
             json.dump(cell_arc_lengths, f, cls=NpEncoder, ensure_ascii=False, indent=4)
         print("done")
-        # exit()
+        exit()
         
     def check_nearest_point(self, mouse_pt):
 
@@ -489,6 +490,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Segmentation GUI')
     parser.add_argument('--input', type=str, default='167', help='Input mesh id from segmentation dataset.')
+    parser.add_argument('--mask', type=str, default=None, help='Output directory.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
     args = parser.parse_args()    
@@ -516,10 +518,14 @@ if __name__ == '__main__':
         c = 25 * (i % 20) + 10
         cmap.append(color_img[20, c ])
 
-    ## load mesh
-    shape_id = args.input
-    path = f"./data/segmentation_data/*/{shape_id}.off"
-    mesh, mask = visualize_psd_shape(path, path.replace(".off", "_labels.txt"))
+    # ## load mesh
+    # shape_id = args.input
+    # path = f"./data/segmentation_data/*/{shape_id}.off"
+    # mesh, mask = visualize_psd_shape(path, path.replace(".off", "_labels.txt"))
+
+    mesh = trimesh.load(args.input, process=False, maintain_order=True)
+    mask = json.load(open(args.mask, 'r'))
+
 
     # Load the OBJ file
     # tri_mesh = trimesh.load(args.input, maintain_order=True, process=False, fix_texture=False, validate=False)
