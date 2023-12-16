@@ -13,7 +13,8 @@ from PIL import Image
 from view_psd_data import *
 from mesh_data_structure.halfedge_mesh import HETriMesh
 from throughhole import cut_through_holes, process_data, cut_annulus
-
+from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
+from mesh_data_structure.build_complex import ComplexBuilder
 class GUI:
 
     def __init__(
@@ -118,6 +119,9 @@ class GUI:
         elif event.keypress == 'u': ## auto segmentation
             self.auto_segmentation()
     
+    def run(self):
+        self.auto_segmentation()
+
     
     def update_mask(self):
         
@@ -225,9 +229,8 @@ class GUI:
         mesh = self.tri_mesh
         merge_annulus = False
 
-
         list_boundaries, non_disk_mask, annulus_mask = process_data(
-            mesh, mask, merge_annulus=False)
+            mesh, mask, merge_annulus=merge_annulus)
         annulus_cuts = cut_annulus(mesh, annulus_mask)
         throughhole_path = cut_through_holes(mesh, non_disk_mask)
 
@@ -280,9 +283,27 @@ class GUI:
         self.plt.add(self.mesh)
 
         self.plt.render()
-        self.save()
+        # self.save()
         
+        ## try to build complex
+        # print(self.output_dir)
+        if not os.path.exists(os.path.join(self.output_dir, "data")):
+            os.makedirs(os.path.join(self.output_dir, "data"))
+            os.makedirs(os.path.join(self.output_dir, "data/single"))
 
+        builder = ComplexBuilder(self.tri_mesh, self.mask, self.output_dir)
+        graph = builder.build_complex_recursive()
+        # print(graph)
+        cell_arc_lengths = get_boundary_length_from_mask(self.tri_mesh, self.mask, graph)
+        builder.base.export(os.path.join(self.output_dir, "data/single", "mesh.obj"))
+        with open(os.path.join(self.output_dir, "data", "mask.json"), 'w') as f:
+            json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+        with open(os.path.join(self.output_dir, "data", "topology_graph.json"), 'w') as f:
+            json.dump(graph, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+        with open(os.path.join(self.output_dir, "data", "cell_arc_lengths.json"), 'w') as f:
+            json.dump(cell_arc_lengths, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+        print("done")
+        # exit()
         
     def check_nearest_point(self, mouse_pt):
 
@@ -507,7 +528,7 @@ if __name__ == '__main__':
 
     # Create output directory
     current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    output_dir = os.path.join(args.outdir, f'{obj_name}_{current_time}')
+    output_dir = os.path.join(args.outdir, f'{obj_name}')
     if os.path.exists(output_dir):
         logger.warning(f'Output directory {output_dir} already exists. Will overwrite.')
     else:
@@ -521,10 +542,10 @@ if __name__ == '__main__':
         close_point_merging = True
 
     gui = GUI(mesh, output_dir, plt, mask, close_point_merging)  
+    # gui.run()
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)
-
     plt.add(msg)
     plt.show()
 

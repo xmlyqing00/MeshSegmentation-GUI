@@ -29,6 +29,9 @@ class GUI:
 
         self.plt = plt
         self.output_dir = output_dir
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+            
         if mask:
             self.mask = mask
         else:
@@ -288,8 +291,7 @@ class GUI:
         logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices
         # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
-        # v = self.mesh.vertices
-        f = np.array(self.mesh.faces(), dtype=np.int64)
+        f = np.array(self.mesh.faces())
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         new_pts = []

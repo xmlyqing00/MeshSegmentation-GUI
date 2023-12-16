@@ -149,7 +149,8 @@ def process_data(mesh, mask, merge_annulus=True):
             if len(tmp_boundaries) == 2:
                 annulus_mask.append(m.tolist())
     else:
-        annulus_mask = simple_floodfill_label_mesh(mesh, annulus_mask)
+        if len(annulus_mask) > 0:
+            annulus_mask = simple_floodfill_label_mesh(mesh, annulus_mask)
     
     print("annulus_mask", len(annulus_mask))
     print("non_disk_mask", len(non_disk_mask))
