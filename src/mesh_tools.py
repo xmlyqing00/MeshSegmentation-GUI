@@ -167,7 +167,10 @@ def split_mesh(mesh, path_pts, face_patches):
     intersection_pairs: a list of pairs
     pair: (qid, eid)
     """
-    mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
+    if len(intersection_pairs) > 0:
+        mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
+    else:
+        face_patches_out = face_patches
     group_id = 0
     mask = []
     while True:

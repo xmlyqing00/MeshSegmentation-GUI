@@ -1,558 +1,204 @@
-import argparse
-import os
+import igl
 import numpy as np
 import trimesh
-import json
-import datetime
-from loguru import logger
-from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
-from potpourri3d import EdgeFlipGeodesicSolver
-from src.utils import NpEncoder
-from src.mesh_tools import split_mesh, floodfill_label_mesh, simple_floodfill_label_mesh
-from PIL import Image
+from copy import deepcopy
 from view_psd_data import *
-from mesh_data_structure.halfedge_mesh import HETriMesh
-from throughhole import cut_through_holes, process_data, cut_annulus
-from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
-from mesh_data_structure.build_complex import ComplexBuilder
+import shutil
+import argparse
+from loguru import logger
+import matplotlib
+import matplotlib.cm as cm
+
+from vedo import Mesh as VedoMesh
+from vedo import show, Plotter, Arrows, Sphere, Spheres, Text2D, Line
+
+from throughhole import MeshSegmentator
+
+## igl
+
+def trace_surface_flow(v, f):
+    v1, v2, k1, k2 = igl.principal_curvature(v, f)
+    h2 = 0.5 * (k1 + k2)
+    avg = igl.avg_edge_length(v, f) / 2.0
+    return v1, v2, h2, avg
+    
+    # p = plot(v, f, h2, shading={"wireframe": False}, return_plot=True)
+    # p.add_lines(v + v1 * avg, v - v1 * avg, shading={"line_color": "red"})
+    # p.add_lines(v + v2 * avg, v - v2 * avg, shading={"line_color": "green"})
+
+def compute_colormap(d, type='continuous'):
+    if type == 'continuous':
+        norm = matplotlib.colors.Normalize(d.min(), d.max(), clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.viridis)
+    elif type == 'discrete':
+        norm = matplotlib.colors.Normalize(0, 20, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.tab20)
+    colors = [(r, g, b, a) for r, g, b, a in mapper.to_rgba(d)]
+    return np.array(colors)*255
+
+
 class GUI:
+    
+    cmap = compute_colormap(np.arange(20), type='discrete')
 
     def __init__(
             self, 
-            tri_mesh: trimesh.Trimesh, 
+            mesh: VedoMesh,
+            mask,
             output_dir: str, 
             plt: Plotter, 
-            mask: list = None,
-            close_point_merging: bool = True,
         ) -> None:
         
+        self.point_size = 0.007
         self.loop_flag = True
-        self.merge_mode = False
-        self.close_point_merging = close_point_merging
+        
+        self.init_mesh = mesh
+        self.init_mask = mask
+        self.init_mesh = self.update_mesh_color(self.init_mesh, self.init_mask)
+
+        self.tri_mesh = trimesh.Trimesh(mesh.vertices, mesh.cells, process=False, maintain_order=True)
 
         self.plt = plt
         self.output_dir = output_dir
-        if mask:
-            self.mask = mask
-        else:
-            self.mask = [np.arange(len(tri_mesh.faces))]
-    
-        self.picked_pts = []
-        self.all_picked_pts = []
-        self.arrow_objs = []
-        self.patches_to_merge = []
-        self.mask_history = []
-        self.tri_mesh_history = []
 
-        tmp_tri_mesh = trimesh.Trimesh(tri_mesh.vertices, tri_mesh.faces, process=False, validate=False)
-        self.mesh = utils.trimesh2vedo(tmp_tri_mesh)
-        self.plt.add(self.mesh)
-        self.tri_mesh = tri_mesh.copy()
+        self.segmentor = MeshSegmentator(self.tri_mesh, mask)
+        self.segmentor(b_close_holes=False)
+        self.refined_mask = self.segmentor.mask
+        self.refined_mesh = VedoMesh([self.segmentor.mesh.vertices, self.segmentor.mesh.faces])
+        self.refined_mesh = self.update_mesh_color(self.refined_mesh, self.refined_mask)
 
-        self.mesh_size = np.array([
-            self.tri_mesh.vertices[:, 0].max() - self.tri_mesh.vertices[:, 0].min(),
-            self.tri_mesh.vertices[:, 1].max() - self.tri_mesh.vertices[:, 1].min(),
-            self.tri_mesh.vertices[:, 2].max() - self.tri_mesh.vertices[:, 2].min(),
-        ])
-        self.thres_nearest_pt = 2e-2 * self.mesh_size.min()
-        self.point_size = 1e-2 * self.mesh_size.min()
-        self.boundary_size = 5e-3 * self.mesh_size.max()
-        self.shadow_dist = 0.2 * self.mesh_size.min()
+        self.show_original = True
+        self.content = []
 
-        if not self.close_point_merging:
-            self.point_size *= 0.05
+        self.render_mesh(self.init_mesh)
 
-        self.enable_shadow = False
-        if self.enable_shadow:
-            self.mesh.add_shadow('z', -self.shadow_dist)
-
-        self.apply_mask()
-
-
-    def on_mouse_click(self, event):
-
-        # mesh = event.actor
-        mouse_pt = event.picked3d
-
-        if mouse_pt is None:
-            return
-        
-        logger.debug(f'Mouse click: {mouse_pt}')
-
-        if self.merge_mode:
-            self.merge_patch(mouse_pt)       
-            return 
-        
-        if self.close_point_merging:
-            mouse_pt = self.check_nearest_point(mouse_pt)
-
-        pid = self.mesh.closest_point(mouse_pt, return_point_id=True)
-        pt = self.mesh.vertices[pid]
-
-        picked_pt = Sphere(pt, r=self.point_size, c='black')
-
-        self.picked_pts.append({
-            'pos': pt,
-            'id': pid,
-            'obj': picked_pt
-        })
-
-        self.plt.add(picked_pt).render()
-
+    def update_mesh_color(self, mesh, mask):
+        for group_idx, group in enumerate(mask):
+            mesh.cellcolors[group] = self.cmap[group_idx % 20]
+        return mesh
 
     def on_key_press(self, event):
+        if event.keypress == 'u':
+            self.toggle_display_mode()
 
-        if event.keypress == 'v' or event.keypress == 'g':
-            self.stack_picked_pts(event.keypress == 'g')
-        elif event.keypress == 's':
-            self.compute_shortest_path()
-        elif event.keypress == 'z':
-            self.compute_geodesic_path()
-        elif event.keypress == 'b':
-            self.clear_last_pt()
-        elif event.keypress == 'c':
-            self.clear_all_pts()
-        elif event.keypress == 'd':
-            self.load_last_mask()
-        elif event.keypress == 'm':
-            self.toggle_merge_mode()
-        elif event.keypress == 'u': ## auto segmentation
-            self.auto_segmentation()
+
+    def toggle_display_mode(self):
+        self.show_original = not self.show_original
+        self.plt.clear()
+        if self.show_original:
+            self.render_mesh(self.init_mesh)
+            logger.info('Show original mesh segmentation.')
+        else:
+            self.render_mesh(self.refined_mesh)
+            self.render_content()
+            logger.info('Show refined mesh segmentation.')
+        
     
-    def run(self):
-        self.auto_segmentation()
 
-    
-    def update_mask(self):
-        
-        picked_pt_pid = []
-        for picked_pts in self.all_picked_pts: 
-            picked_pt_pid.append(
-                [self.mesh.closest_point(x['pos'], return_point_id=True) for x in picked_pts]
-            )
+    def render_principal_curvature(self):
+        v = np.array(self.mesh.vertices)
+        f = np.array(self.mesh.cells, dtype=np.int32)
 
-        if len(picked_pt_pid) > 0:
-        
-            self.mask = floodfill_label_mesh(
-                self.tri_mesh, 
-                self.boundary_edges,
-                picked_pt_pid, 
-            )
+        ## 
+        v1, v2, h2, avg = trace_surface_flow(v, f)
 
-            self.apply_mask()
-        else:
-            print('No picked points. Nothing changed.')
+        ## color the mesh with mean curvature
+        face_h2 = np.mean(h2[f], axis=1)
+        rgbd = compute_colormap(face_h2)
+        print(rgbd.shape)
+        mesh.cellcolors = rgbd
 
+        ## draw principal flows
+        arrows_1 = Arrows(v + v1 * avg, v - v1 * avg, s=0.5).c('red')
+        arrows_2 = Arrows(v + v2 * avg, v - v2 * avg, s=0.5).c('green')
+        plt.add(arrows_1)
+        plt.add(arrows_2)
+        plt.render()
 
-    def apply_mask(self):
+    def render_content(self):        
+        ## render cuts and boundaries
+        for cut in self.segmentor.cut_list:
+            if cut.dead:
+                continue
+            self.content.append(Spheres(cut.points, c='red', r=self.point_size))
+        for boundary in self.segmentor.boundary_list:
+            if boundary.dead:
+                continue
+            self.content.append(Spheres(boundary.points, c='blue', r=self.point_size))
+            # self.content.append(Line(boundary.points, c='blue', lw=3))
 
-        self.face_patches = -1 + np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
-        for i, seg in enumerate(self.mask):
-            for fid in seg:
-                self.face_patches[fid] = i
-        
-        group_num = len(self.mask)
-        for i in range(len(self.face_patches)):
-            if self.face_patches[i] == -1:
-                logger.info(f'Found a single face. Face id: {i}')
-                self.face_patches[i] = group_num
-                group_num += 1
-                self.mask.append([i])
-
-        f_adj = self.tri_mesh.face_adjacency
-        fe_adj = np.sort(self.tri_mesh.face_adjacency_edges, axis=1)
-
-        self.boundary_pts = set()
-        self.boundary_edges = set()
-        for i in range(len(f_adj)):
-            if self.face_patches[f_adj[i][0]] != self.face_patches[f_adj[i][1]]:
-                self.boundary_pts.add(fe_adj[i][0])
-                self.boundary_pts.add(fe_adj[i][1])
-                self.boundary_edges.add((fe_adj[i][0], fe_adj[i][1]))
-        
-        logger.info(f'Patch number: {len(self.mask)}')
-        self.update_mesh_color()
-
-        unique_edges = self.tri_mesh.edges[trimesh.grouping.group_rows(self.tri_mesh.edges_sorted, require_count=1)]
-        logger.info(f'Edge number of open boundary: {unique_edges.shape[0]}')
-        self.boundary_pts.update(unique_edges.flatten().tolist())
-
-
-    def toggle_merge_mode(self):
-        self.merge_mode = not self.merge_mode
-        self.patches_to_merge = []
-        if self.merge_mode:
-            logger.info('Merge mode on.')
-        else:
-            logger.info('Merge mode off.')
-
-
-    def merge_patch(self, mouse_pt: list):
-        
-        fid = self.mesh.closest_point(mouse_pt, return_cell_id=True)
-        patch_id = self.face_patches[fid]
-        logger.info(f'Selected face id {fid}. patch id {patch_id}')
-        if patch_id in self.patches_to_merge:
-            logger.warning('This patch has been picked. Clear the selected patches.')
-            self.patches_to_merge = []
-            return
-        
-        self.patches_to_merge.append(patch_id)
-        if len(self.patches_to_merge) < 2:
-            return
-        
-        self.mask_history.append(self.mask.copy())
-        self.tri_mesh_history.append(self.tri_mesh)
-        logger.success(f'Merge two patches {self.patches_to_merge}')
-
-        patch_id0 = self.patches_to_merge[0]
-        patch_id1 = self.patches_to_merge[1]
-        self.mask[patch_id0].extend(self.mask[patch_id1])
-        self.mask.pop(patch_id1)
-        self.patches_to_merge = []
-
-        self.apply_mask()
-        self.save()
-        
-    def auto_segmentation(self):
-        logger.info(f'Automatic segmentation')
-        """
-        new idea:
-        1 get the mask of the mesh
-        2 get the boundary of each mask. These are the existing cuts
-        3 For each mask that has a disk topology, compute its centroid
-        4 Compute a TSP path that goes through all centroids
-        5 Cut the mesh along the TSP path and the existing cuts
-        """
-
-        mask = self.mask
-        mesh = self.tri_mesh
-        merge_annulus = False
-
-        list_boundaries, non_disk_mask, annulus_mask = process_data(
-            mesh, mask, merge_annulus=merge_annulus)
-        annulus_cuts = cut_annulus(mesh, annulus_mask)
-        throughhole_path = cut_through_holes(mesh, non_disk_mask)
-
-        self.boundary_edges = []
-        for i, boundaries in enumerate(list_boundaries):
-            for boundary in boundaries:
-                self.boundary_edges.extend(boundary)
-
-        self.all_picked_pts = []
-        cut_pts = []
-        for path in throughhole_path:
-            picked_pts = []
-            cut_pts.extend(np.array(path))
-            for pt in path:
-                # picked_pt = Sphere(pt, r=self.point_size, c='black')
-                # self.plt.add(picked_pt).render()
-                picked_pts.append({
-                    'pos': pt,
-                    'obj': None
-                })
-            self.all_picked_pts.append(picked_pts)
-        print(len(cut_pts))
-        for path in annulus_cuts:
-            picked_pts = []
-            cut_pts.extend(np.array(path))
-            for pt in path:
-                # picked_pt = Sphere(pt, r=self.point_size, c='black')
-                # self.plt.add(picked_pt).render()
-                picked_pts.append({
-                    'pos': pt,
-                    'obj': None
-                })
-            self.all_picked_pts.append(picked_pts)
-        print(len(cut_pts))
-
-        old_mesh = self.mesh
-        self.mask_history.append(self.mask)
-        self.tri_mesh_history.append(self.tri_mesh)
-
-        self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(cut_pts), self.face_patches)
-        self.mesh = utils.trimesh2vedo(self.tri_mesh)
-        # print('cell colors len in compute', len(self.mesh.cellcolors))
-        # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
-        if self.enable_shadow:
-            self.mesh.add_shadow('z', -self.shadow_dist)
-
-        self.apply_mask()
-        self.update_mask()
-        self.plt.remove(old_mesh)
-        self.plt.add(self.mesh)
-
-        self.plt.render()
-        # self.save()
-        
-        ## try to build complex
-        # print(self.output_dir)
-        if not os.path.exists(os.path.join(self.output_dir, "data")):
-            os.makedirs(os.path.join(self.output_dir, "data"))
-            os.makedirs(os.path.join(self.output_dir, "data/single"))
-
-        builder = ComplexBuilder(self.tri_mesh, self.mask, self.output_dir)
-        graph = builder.build_complex_recursive()
-        # print(graph)
-        cell_arc_lengths = get_boundary_length_from_mask(self.tri_mesh, self.mask, graph)
-        builder.base.export(os.path.join(self.output_dir, "data/single", "mesh.obj"))
-        with open(os.path.join(self.output_dir, "data", "mask.json"), 'w') as f:
-            json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
-            print(f"mask saved: {os.path.join(self.output_dir, 'data', 'mask.json')}")
-        with open(os.path.join(self.output_dir, "data", "topology_graph.json"), 'w') as f:
-            json.dump(graph, f, cls=NpEncoder, ensure_ascii=False, indent=4)
-        with open(os.path.join(self.output_dir, "data", "cell_arc_lengths.json"), 'w') as f:
-            json.dump(cell_arc_lengths, f, cls=NpEncoder, ensure_ascii=False, indent=4)
-        print("done")
-        exit()
-        
-    def check_nearest_point(self, mouse_pt):
-
-        if len(self.boundary_pts) == 0:
-            return mouse_pt
-        
-        boundary_pts = self.tri_mesh.vertices[list(self.boundary_pts)]
-        dist = np.linalg.norm(boundary_pts - mouse_pt, axis=1)
-        idx = np.argmin(dist)
-        if dist[idx] < self.thres_nearest_pt:
-            logger.info(f'Found nearest existing pt: {boundary_pts[idx]}. Distance: {dist[idx]}')
-            return boundary_pts[idx]
-        else:
-            logger.info(f'The nearest existing pt is too far. Distance: {dist[idx]}')
-            return mouse_pt
-
-    def update_mesh_color(self):
-
-        for group_idx, group in enumerate(self.mask):
-            self.mesh.cellcolors[group] = cmap[group_idx % 20]
-           
-        self.plt.remove(self.arrow_objs)
-        self.arrow_objs = []
-        for eid, edge in enumerate(list(self.boundary_edges)):
-            arrow = Line(
-                self.tri_mesh.vertices[edge[0]],
-                self.tri_mesh.vertices[edge[1]],
-                lw=self.boundary_size, 
-                c='black'
-            )
-            self.arrow_objs.append(arrow)
-        self.plt.add(self.arrow_objs)
-        self.plt.render()
-            
-
-    def stack_picked_pts(self, loop_flag: bool = False):
-        stack_type = 'Loop' if loop_flag else 'Path'
-        logger.success(f'Stack picekd pts as {stack_type}')
-        if len(self.picked_pts) < 2:
-            logger.warning('The number of the picked points must be larger than 2. Do nothing.')
-            return
-
-        if loop_flag:
-            self.picked_pts.append(self.picked_pts[0])
-
-        self.all_picked_pts.append(self.picked_pts)
-        self.picked_pts = []
-
-
-    def compute_shortest_path(self):
-        
-        if len(self.picked_pts) > 0:
-            logger.warning('You have unstacked picked pts. Stack them first by press f/g. Do nothing.')
-            return
-
-        logger.success(f'Compute the SHORTEST path. Number of paths of picked pts: {len(self.all_picked_pts)}')
-
-        old_mesh = self.mesh
-        self.mask_history.append(self.mask)
-        self.tri_mesh_history.append(self.tri_mesh)
-
-        if self.enable_shadow:
-            self.mesh.add_shadow('z', -self.shadow_dist)
-
-        self.apply_mask()
-        self.update_mask()
-        self.plt.remove(old_mesh)
-        self.plt.add(self.mesh)
-
-        self.plt.render()
-        self.save()
-
-
-    def compute_geodesic_path(self):
-        
-        if len(self.picked_pts) > 0:
-            logger.warning('You have unstacked picked pts. Stack them first by press f/g. Do nothing.')
-            return
-
-        logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
-        v = self.mesh.vertices()
-        # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
-        # v = self.mesh.vertices
-        f = np.array(self.mesh.faces)
-        path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
-
-        new_pts = []
-        for picked_pts in self.all_picked_pts:
-            for i in range(1, len(picked_pts)):
-                v_start = picked_pts[i - 1]['id']
-                v_end = picked_pts[i]['id']
-                # logger.debug(v_start, v_end)
-                path_pts = path_solver.find_geodesic_path(v_start, v_end)
-                # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
-                new_pts.extend(path_pts[1:-1])
-
-        old_mesh = self.mesh
-        self.mask_history.append(self.mask)
-        self.tri_mesh_history.append(self.tri_mesh)
-
-        print(self.face_patches.max())
-        self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
-        print(len(self.mask))
-
-        self.mesh = utils.trimesh2vedo(self.tri_mesh)
-        # print('cell colors len in compute', len(self.mesh.cellcolors))
-        # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
-        if self.enable_shadow:
-            self.mesh.add_shadow('z', -self.shadow_dist)
-
-        self.apply_mask()
-        self.update_mask()
-        self.plt.remove(old_mesh)
-        self.plt.add(self.mesh)
-
-        self.plt.render()
-        self.save()
-        
-    def clear_last_pt(self):
-        logger.success('Clear the last picked point')
-        if len(self.picked_pts) > 0:
-            self.plt.remove(self.picked_pts[-1]['obj'])
-            self.picked_pts.pop()
-            self.plt.render()
-
-
-    def clear_all_pts(self):
-        logger.success('Clear the picked points')
-        
-        for pt in self.picked_pts:
-            self.plt.remove(pt['obj'])
-        self.picked_pts = []
-
-        for picked_pts in self.all_picked_pts:
-            for pt in picked_pts:
-                self.plt.remove(pt['obj'])
-        self.all_picked_pts = []
-        
+        for c in self.content:
+            self.plt.add(c)
         self.plt.render()
 
 
-    def load_last_mask(self):
-        
-        if len(self.mask_history) > 0:
-            print(len(self.mask_history[-1]))
-            self.tri_mesh = self.tri_mesh_history.pop()
-            self.mask = self.mask_history.pop()
-            old_mesh = self.mesh
-            self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
-            if self.enable_shadow:
-                self.mesh.add_shadow('z', -self.shadow_dist)
-            self.apply_mask()
-            
-            self.plt.remove(old_mesh)
-            self.plt.add(self.mesh)
-            self.plt.render()
-            self.save()
-
-            logger.success('Load the last mask. The number of history masks is', len(self.mask_history))
-        else:
-            logger.warning('This is already the first patch mask.')
+    def render_mesh(self, mesh: VedoMesh):
+        self.plt.add(mesh)
+        self.plt.render()
 
 
-    def save(self):
-
-        obj_path = os.path.join(self.output_dir, 'segmented_mesh.ply')
-        viz_obj_path = os.path.join(self.output_dir, 'segmentation_viz.ply')
-        mask_path = os.path.join(self.output_dir, 'mask.json')
-
-        with open(mask_path, 'w') as f:
-            json.dump(self.mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
-
-        self.tri_mesh.export(obj_path)
-        write(self.mesh, viz_obj_path)
-
-        self.clear_all_pts()
-
-        logger.success(f'Saved mask and mesh to {self.output_dir}.')
-        logger.info('Ready for the next segmentation.')
+    def clear_content(self):
+        for c in self.content:
+            self.plt.remove(c)
+        self.content = []
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     parser = argparse.ArgumentParser('Segmentation GUI')
-    parser.add_argument('--input', type=str, default='167', help='Input mesh id from segmentation dataset.')
-    parser.add_argument('--mask', type=str, default=None, help='Output directory.')
-    parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
-    parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
-    args = parser.parse_args()    
-    logger.info(f'Arguments: {args}')
-
+    parser.add_argument('--input', type=str, default='167', help='Input mesh path.')
+    args = parser.parse_args()
 
     help_text = 'Mouse left-click to pick vertex.\n' \
-        'Press v/g to stack path/loop of picked vertices.\n' \
-        'Press z to compute Geodesic path/loop.\n' \
-        'Press s to compute Shortest path/loop (no new vertex).\n' \
-        'Press b to clear the LAST picked points.\n' \
-        'Press c to clear ALL picked points.\n' \
-        'Press d to load the last segmentations.\n' \
-        'Press m to toggle patch merging mode.\n' \
-        'Press u to auto segment a patch.\n' \
+        'Press z to refine the segmented mesh/loop.\n' \
+        'Press u to toggle the displayed segmentation mask.\n' \
         'Press h to see more help and default features.'
     logger.info(f'Keyboard shortcuts:\n{help_text}')
 
     msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
     msg.text(help_text)
 
-    color_img = np.asarray(Image.open('assets/cm_tab20.png').convert('RGBA'))
-    cmap = []
-    for i in range(20):
-        c = 25 * (i % 20) + 10
-        cmap.append(color_img[20, c ])
 
-    # ## load mesh
-    # shape_id = args.input
-    # path = f"./data/segmentation_data/*/{shape_id}.off"
-    # mesh, mask = visualize_psd_shape(path, path.replace(".off", "_labels.txt"))
+    save_dir = "output_throughhole"
+    if os.path.exists(save_dir):
+        print("remove", save_dir)
+        shutil.rmtree(save_dir, ignore_errors=True)
+    os.makedirs(save_dir, exist_ok=True)
 
-    mesh = trimesh.load(args.input, process=False, maintain_order=True)
-    mask = json.load(open(args.mask, 'r'))
-
-
-    # Load the OBJ file
-    # tri_mesh = trimesh.load(args.input, maintain_order=True, process=False, fix_texture=False, validate=False)
-    logger.info(f'Mesh vertices and faces: {mesh.vertices.shape}, {mesh.faces.shape}')
-    obj_name = "autoseg"+os.path.basename(args.input).split('.')[0]
-
-    # Create output directory
-    current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    output_dir = os.path.join(args.outdir, f'{obj_name}')
-    if os.path.exists(output_dir):
-        logger.warning(f'Output directory {output_dir} already exists. Will overwrite.')
-    else:
-        logger.info(f'Create output directory: {output_dir}.')
-        os.makedirs(output_dir)
-
+    ## load mesh
+    shape_id = args.input
+    fpath = f"./data/segmentation_data/*/{shape_id}.off"
+    _, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"))
+    mesh = VedoMesh(fpath)
+    
     plt = Plotter(axes=8, bg='white', size=(1200, 800))
-    if args.no_close_point_merging:
-        close_point_merging = False
-    else:
-        close_point_merging = True
+    gui = GUI(mesh, mask, save_dir, plt)
 
-    gui = GUI(mesh, output_dir, plt, mask, close_point_merging)  
-    # gui.run()
-
-    plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)
     plt.add(msg)
     plt.show()
 
     plt.close()
+    
+    # v = np.array(mesh.vertices)
+    # f = np.array(mesh.cells, dtype=np.int32)
+
+    # ## 
+    # v1, v2, h2, avg = trace_surface_flow(v, f)
+
+    # ## color the mesh with mean curvature
+    # face_h2 = np.mean(h2[f], axis=1)
+    # rgbd = compute_colormap(face_h2)
+    # print(rgbd.shape)
+    # mesh.cellcolors = rgbd
+
+    # ## draw principal flows
+    # arrows_1 = Arrows(v + v1 * avg, v - v1 * avg, s=0.5).c('red')
+    # arrows_2 = Arrows(v + v2 * avg, v - v2 * avg, s=0.5).c('green')
+
+    # plt = Plotter(axes=8, bg='white', size=(1200, 800))
+    # plt.add(mesh)
+    # plt.add(arrows_1)
+    # plt.add(arrows_2)
+    # plt.show()
+    # plt.close()
