@@ -12,7 +12,7 @@ import matplotlib.cm as cm
 from vedo import Mesh as VedoMesh
 from vedo import show, Plotter, Arrows, Sphere, Spheres, Text2D, Line
 
-from throughhole import MeshSegmentator
+from mesh_segmentor import MeshSegmentator
 
 ## igl
 
