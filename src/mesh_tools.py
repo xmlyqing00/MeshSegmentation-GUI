@@ -179,6 +179,7 @@ def split_mesh(mesh, path_pts, face_patches, intersection_merged_threshold=0.15)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces)
     else:
         mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
+
     group_id = 0
     mask = []
     while True:

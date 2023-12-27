@@ -56,5 +56,3 @@ def close_holes(mesh: HETriMesh, boundaries: list):
 
 
 
-
-

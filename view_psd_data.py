@@ -5,6 +5,7 @@ import trimesh
 import os
 from glob import glob
 import json
+import argparse
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -50,16 +51,19 @@ def visualize_psd_shape(shape_file, segmask_file, textured=False):
 if __name__ == "__main__":
 
     folder = "/home/lyang/yl_code/dataset/labeledDb/LabeledDB_new/*"
-    # table "141"
-    shape_id = "167" 
-    shape_file = os.path.join(folder, f"{shape_id}.off")
-    segmask_file = os.path.join(folder, f"{shape_id}_labels.txt")
+    parser = argparse.ArgumentParser('Segmentation GUI')
+    parser.add_argument('--input', type=str, default='167', help='Input mesh path.')
+    args = parser.parse_args()
+    
 
-    mesh, mask = visualize_psd_shape(shape_file, segmask_file, textured=True)
+    ## load mesh
+    shape_id = args.input
+    fpath = f"./data/segmentation_data/*/{shape_id}.off"
 
-    mask_path = f"{shape_id}_mask.json"
-    with open(mask_path, 'w') as f:
-        json.dump(mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+    mesh, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"), textured=True)
 
-    mesh.export(f"{shape_id}.obj")
+    # mask_path = f"{shape_id}_mask.json"
+    # with open(mask_path, 'w') as f:
+    #     json.dump(mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+    # mesh.export(f"{shape_id}.obj")
     mesh.show()
