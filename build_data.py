@@ -1,11 +1,16 @@
 import os
+import sys
+sys.path.append(os.getcwd())
+
+import shutil
 import trimesh
 import argparse
 import numpy as np
-from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
 import json
 from src.utils import NpEncoder
 from igl_parameterization import parameterize_mesh
+from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
+from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
 
 def read_json(file):
     with open(file, 'r') as f:
@@ -69,18 +74,25 @@ if __name__ == '__main__':
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
     
+
     ## root folder
-    savefolder = f'./data_built/{args.model_name}'
+    root_dir = f'./data_built/{args.model_name}'
+    if not os.path.exists(root_dir):
+        os.makedirs(root_dir)
+    savefolder = f'{root_dir}/data'
     if not os.path.exists(savefolder):
         os.makedirs(savefolder)
-
     ## build complex from the base mesh and its patches (dict)
-    complex_builder = ComplexBuilder(mesh, mask, savefolder=savefolder)
+    complex_builder = ComplexBuilder(mesh, mask)
     graph = complex_builder.build_complex_recursive()
+    # complex_builder.save_complex(graph, root_dir)
     print(graph)
     write_json(graph, os.path.join(savefolder, "topology_graph.json"))
-    node_ids = np.array(graph['node_ids'], dtype=np.int32)
-    cells = graph['cells']
+    shutil.copyfile(maskfile, os.path.join(savefolder, 'mask.json'))
+    ## cell arc lengths
+    cell_arc_lengths = get_boundary_length_from_mask(mesh, mask, graph)
+    write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
+    
 
     ## save normalized mesh
     savemeshfolder = f'{savefolder}/single'
@@ -90,17 +102,16 @@ if __name__ == '__main__':
     mesh = normalize_data(mesh)
     mesh.export(save_meshfile)
 
+
     ## parameterization
-    savepatchfolder = f'./data_built/{args.model_name}/parameterization'
+    savepatchfolder = f'{root_dir}/parameterization'
     if not os.path.exists(savepatchfolder):
         os.makedirs(savepatchfolder)
-    saveflatfolder = f'./data_built/{args.model_name}/flat_parameterization'
+    saveflatfolder = f'{root_dir}/flat_parameterization'
     if not os.path.exists(saveflatfolder):
         os.makedirs(saveflatfolder)
-
-    print()
-    print()
-    print()
+    node_ids = np.array(graph['node_ids'], dtype=np.int32)
+    cells = graph['cells']
     for i in range(len(mask)):
         print(i, " -- face size in this mask: ", len(mask[i]))
 
@@ -124,7 +135,7 @@ if __name__ == '__main__':
         ## parameterization
         uv, bnd_uv = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
-        write_obj_file(f"corner_{i}.obj", corners)
+        # write_obj_file(f"corner_{i}.obj", corners)
         submesh.export(f'{savepatchfolder}/mesh_uv_{i}.obj')
 
 
