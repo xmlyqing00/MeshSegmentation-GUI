@@ -10,3 +10,5 @@ output*
 
 *.obj
 *.ply
+
+data_built/
