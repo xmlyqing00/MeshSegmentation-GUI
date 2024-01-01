@@ -11,6 +11,7 @@ from src.utils import NpEncoder
 from igl_parameterization import parameterize_mesh
 from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
 from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
+from PIL import Image
 
 def read_json(file):
     with open(file, 'r') as f:
@@ -51,6 +52,21 @@ def count_foldover_triangles(mesh, threshold):
     flipped_faces = np.unique(face_pairs[face_pair_mask])
     return flipped_faces
 
+## can draw line segments
+def write_line_file2(save_to, V, L, C=None, vid_start=1):
+    with open(save_to, 'w') as f:
+        if C is not None:
+            for Vi, Ci in zip(V, C):
+                f.write(f"v {Vi[0]} {Vi[1]} {Vi[2]} {Ci[0]} {Ci[1]} {Ci[2]}\n")
+        else:
+            for Vi in V:
+                f.write(f"v {Vi[0]} {Vi[1]} {Vi[2]}\n")
+        # f.write('s off\n')
+        for Li in L:
+            line = "l "
+            for i in Li:
+                line = f"{line}{i+vid_start} "
+            f.write(line+'\n')
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Modeling 3D shapes with neural patches")
@@ -74,11 +90,16 @@ if __name__ == '__main__':
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
     
+    texture_img = Image.open(f'./assets/checkerboard.png')
 
     ## root folder
     root_dir = f'./data_built/{args.model_name}'
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
+    else:
+        shutil.rmtree(root_dir)
+        os.makedirs(root_dir)
+
     savefolder = f'{root_dir}/data'
     if not os.path.exists(savefolder):
         os.makedirs(savefolder)
@@ -86,12 +107,14 @@ if __name__ == '__main__':
     complex_builder = ComplexBuilder(mesh, mask)
     graph = complex_builder.build_complex_recursive()
     # complex_builder.save_complex(graph, root_dir)
-    print(graph)
+    # print(graph)
     write_json(graph, os.path.join(savefolder, "topology_graph.json"))
     shutil.copyfile(maskfile, os.path.join(savefolder, 'mask.json'))
     ## cell arc lengths
     cell_arc_lengths = get_boundary_length_from_mask(mesh, mask, graph)
-    write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
+    # for cl in cell_arc_lengths:
+    #     print(cl)
+    # write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
     
 
     ## save normalized mesh
@@ -112,41 +135,69 @@ if __name__ == '__main__':
         os.makedirs(saveflatfolder)
     node_ids = np.array(graph['node_ids'], dtype=np.int32)
     cells = graph['cells']
-    for i in range(len(mask)):
-        print(i, " -- face size in this mask: ", len(mask[i]))
 
-        # print("cell nodes: ", cells[i])
+    cell_arc_lengths = []
+    for i in range(len(mask)):
+        # if i > 0:
+        #     break
+
         nodes = node_ids[cells[i]]
-        # print("node ids in original mesh: ", nodes)
         corners = mesh.vertices[nodes]
         submesh = mesh.submesh([mask[i]], only_watertight=False)[0]
-        # print("submesh.vertices", len(submesh.vertices))
-        # print("submesh.faces", len(submesh.faces))
 
         ## build proximity mesh
         pq_patch = trimesh.proximity.ProximityQuery(submesh)
         crn_ids = pq_patch.vertex(corners)[1].tolist()
         corners = submesh.vertices[crn_ids]
+        print("corners: ", corners)
         # print("patchmesh.vertices", len(patchmesh.vertices))
         # print("patchmesh.faces", len(patchmesh.faces))
-        flipped = count_foldover_triangles(submesh, 135)
-        print("flipped faces: ", len(flipped))
+        # flipped = count_foldover_triangles(submesh, 135)
+        # print("flipped faces: ", len(flipped))
 
         ## parameterization
-        uv, bnd_uv = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+        uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
-        # write_obj_file(f"corner_{i}.obj", corners)
-        submesh.export(f'{savepatchfolder}/mesh_uv_{i}.obj')
+        crn_uv = np.concatenate((crn_uv, np.zeros((crn_uv.shape[0], 1))), axis=1)
+        bnd_uv = np.concatenate((bnd_uv, np.zeros((bnd_uv.shape[0], 1))), axis=1)
+        # for j, c in enumerate(corners):
+        #     write_obj_file(f'corner_{i}_{j}.obj', [c])
+        #     write_obj_file(f'corner_uv_{i}_{j}.obj', [crn_uv[j]])
+        submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
 
+        submesh.export(f'{savepatchfolder}/mesh_uv_{i}.obj')
+        cell_arc_lengths.append(list_boundary_length)
+
+        crn_points = np.stack([corners, crn_uv[:-1]], axis=1)
+        crn_points = crn_points.reshape(-1,3)
+        corner_links = np.stack([np.arange(0, len(crn_points), 2), np.arange(1, len(crn_points), 2)], axis=-1)
+        write_line_file2(f"corner_links_{i}.obj", crn_points, corner_links)
 
         ## save parameterized mesh
         uv3d = np.concatenate((uv, np.zeros((uv.shape[0], 1))), axis=1)
         flat = trimesh.Trimesh(vertices=uv3d, faces=submesh.faces, process=False, maintain_order=True)
-        flipped = count_foldover_triangles(submesh, 135)
-        print("flat flipped faces: ", len(flipped))
+        flat.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
+        # flipped = count_foldover_triangles(submesh, 135)
+        # print("flat flipped faces: ", len(flipped))
         flat.export(f'{saveflatfolder}/flat_{i}.obj')
 
+        import matplotlib
+        from matplotlib import cm
+        norm = matplotlib.colors.Normalize(0, 1, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
+        colors = np.linspace(0,1,len(bnd_list))
+        colors = mapper.to_rgba(colors)[:,:3]
+        # points = np.stack([submesh.vertices[bnd_list], uv3d[bnd_list]], axis=1)
+        points = np.stack([submesh.vertices[bnd_list], bnd_uv], axis=1)
+        colors = np.stack([colors, colors], axis=1)
+        points = points.reshape(-1,3)
+        colors = colors.reshape(-1,3)
+        boundary_links = np.stack([np.arange(0, len(points), 2), np.arange(1, len(points), 2)], axis=-1)
+        write_line_file2(f"boundary_links_{i}.obj", points, boundary_links, colors)
 
+    for cl in cell_arc_lengths:
+        print(cl)
+    write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
 
     
 
