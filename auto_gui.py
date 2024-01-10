@@ -37,7 +37,7 @@ def compute_colormap(d, type='continuous'):
     return np.array(colors)*255
 
 
-class GUI:
+class AutoSegGUI:
     
     cmap = compute_colormap(np.arange(20), type='discrete')
 
@@ -47,9 +47,11 @@ class GUI:
             mask,
             output_dir: str, 
             plt: Plotter, 
+            smooth_flag: bool,
+            smooth_deg: int,
         ) -> None:
         
-        self.point_size = 0.007
+        
         self.loop_flag = True
         
         self.init_mesh = mesh
@@ -58,10 +60,16 @@ class GUI:
 
         self.tri_mesh = trimesh.Trimesh(mesh.vertices, mesh.cells, process=False, maintain_order=True)
 
+        self.mesh_size = np.array([
+            self.tri_mesh.vertices[:, 0].max() - self.tri_mesh.vertices[:, 0].min(),
+            self.tri_mesh.vertices[:, 1].max() - self.tri_mesh.vertices[:, 1].min(),
+            self.tri_mesh.vertices[:, 2].max() - self.tri_mesh.vertices[:, 2].min(),
+        ])
+        self.point_size = 1e-3 * self.mesh_size.min()
+
         self.plt = plt
         self.output_dir = output_dir
-
-        self.segmentor = MeshSegmentator(self.tri_mesh, mask)
+        self.segmentor = MeshSegmentator(self.tri_mesh, mask, smooth_flag=smooth_flag, smooth_deg=smooth_deg)
         self.segmentor(b_close_holes=False)
         self.refined_mask = self.segmentor.mask
         self.refined_mesh = VedoMesh([self.segmentor.mesh.vertices, self.segmentor.mesh.faces])
@@ -71,11 +79,14 @@ class GUI:
         self.content = []
 
         self.render_mesh(self.init_mesh)
+        # self.render_mesh(self.refined_mesh)
+
 
     def update_mesh_color(self, mesh, mask):
         for group_idx, group in enumerate(mask):
             mesh.cellcolors[group] = self.cmap[group_idx % 20]
         return mesh
+
 
     def on_key_press(self, event):
         if event.keypress == 'u':
@@ -86,6 +97,7 @@ class GUI:
         self.show_original = not self.show_original
         self.plt.clear()
         if self.show_original:
+            self.clear_content()
             self.render_mesh(self.init_mesh)
             logger.info('Show original mesh segmentation.')
         else:
@@ -94,7 +106,6 @@ class GUI:
             logger.info('Show refined mesh segmentation.')
         
     
-
     def render_principal_curvature(self):
         v = np.array(self.mesh.vertices)
         f = np.array(self.mesh.cells, dtype=np.int32)
@@ -115,17 +126,34 @@ class GUI:
         plt.add(arrows_2)
         plt.render()
 
+
     def render_content(self):        
         ## render cuts and boundaries
+        self.content = []
         for cut in self.segmentor.cut_list:
             if cut.dead:
                 continue
             self.content.append(Spheres(cut.points, c='red', r=self.point_size))
+            for p_idx in range(1, len(cut.points)):
+                line = Line(
+                    cut.points[p_idx-1], 
+                    cut.points[p_idx], 
+                    c='red', 
+                    lw=self.point_size
+                )
+                self.content.append(line)
         for boundary in self.segmentor.boundary_list:
             if boundary.dead:
                 continue
             self.content.append(Spheres(boundary.points, c='blue', r=self.point_size))
-            # self.content.append(Line(boundary.points, c='blue', lw=3))
+            for p_idx in range(1, len(boundary.points)):
+                line = Line(
+                    boundary.points[p_idx-1], 
+                    boundary.points[p_idx], 
+                    c='blue', 
+                    lw=self.point_size
+                )
+                self.content.append(line)
 
         for c in self.content:
             self.plt.add(c)
@@ -147,9 +175,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser('Segmentation GUI')
     parser.add_argument('--input', type=str, default='167', help='Input mesh path.')
+    parser.add_argument('--smooth', action='store_true', help='Smooth the boundary.')
+    parser.add_argument('--smooth-deg', type=int, default=4, help='Degree of the smooth boundary.')
     args = parser.parse_args()
 
-    help_text = 'Mouse left-click to pick vertex.\n' \
+    logger.info(f'Arguments: {args}')
+
+    help_text = 'Mouse left-click to drag the view.\n' \
         'Press z to refine the segmented mesh/loop.\n' \
         'Press u to toggle the displayed segmentation mask.\n' \
         'Press h to see more help and default features.'
@@ -157,7 +189,6 @@ if __name__ == "__main__":
 
     msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
     msg.text(help_text)
-
 
     save_dir = "output_throughhole"
     if os.path.exists(save_dir):
@@ -172,7 +203,7 @@ if __name__ == "__main__":
     mesh = VedoMesh(fpath)
     
     plt = Plotter(axes=8, bg='white', size=(1200, 800))
-    gui = GUI(mesh, mask, save_dir, plt)
+    gui = AutoSegGUI(mesh, mask, save_dir, plt, args.smooth, args.smooth_deg)
 
     plt.add_callback('key press', gui.on_key_press)
     plt.add(msg)

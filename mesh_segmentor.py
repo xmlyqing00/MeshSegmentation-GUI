@@ -1,230 +1,22 @@
 from typing import Any
+import os
 import trimesh
 import numpy as np
-from potpourri3d import EdgeFlipGeodesicSolver
+import networkx as nx
 from tsp_solver.greedy import solve_tsp
 from view_psd_data import *
+from scipy.spatial.distance import cdist
 import shutil
 import argparse
+import bisect
 
 from loguru import logger
 from mesh_data_structure.halfedge_mesh import HETriMesh
-from mesh_data_structure.utils import trace_boundary_edges, close_holes
-import networkx as nx
-from sklearn.neighbors import KDTree
+from mesh_data_structure.utils import trace_boundary_edges, close_holes, compute_distance_matrix, convert_list_to_string, simple_floodfill_label_mesh, GeoPathSolverWrapper, get_open_boundary
+from mesh_data_structure.components import PatchTopo, Boundary, Cut
 
 from src.mesh_tools import split_mesh, split_mesh_by_path, floodfill_label_mesh
 
-def convert_list_to_string(l:list):
-    return ",".join([str(i) for i in l])
-
-
-def compute_distance_matrix(mesh, b_close_holes=True):
-    ## close the holes and compute the centroid of each hole
-    if b_close_holes:
-        mesh_holefilled, cids = mesh_close_holes(mesh)
-        path_solver = GeoPathSolverWrapper(mesh_holefilled)
-        paths, distance_matrix = path_solver.solve_all2all(cids, return_distance_matrix=True)
-    ## compute the shortest distance between each pair of holes
-    else:
-        path_solver = GeoPathSolverWrapper(mesh)
-        boundary_loops = get_open_boundary(mesh)
-        distance_matrix = np.zeros((len(boundary_loops), len(boundary_loops)))
-        paths = {}
-        for i in range(len(boundary_loops)-1):
-            for j in range(i+1, len(boundary_loops)):
-                b0 = np.array(boundary_loops[i], dtype=np.int32)[:,0]
-                b0 = np.hstack([b0, boundary_loops[i][-1][1]])
-                b1 = np.array(boundary_loops[j], dtype=np.int32)[:,0]
-                b1 = np.hstack([b1, boundary_loops[j][-1][1]])
-                path_pts, distance = path_solver.solve_path2path(b0, b1)
-                paths[f"{i},{j}"] = path_pts
-                ## 
-                distance_matrix[i, j] = distance
-                distance_matrix[j, i] = distance
-    return paths, distance_matrix 
-
-class GeoPathSolverWrapper():
-    def __init__(self, mesh : trimesh.Trimesh) -> None:
-        v = mesh.vertices
-        f = np.array(mesh.faces, dtype=np.int32)
-        self.solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
-
-    def solve_all2all(self, vids, return_distance_matrix=False):
-        paths = {}
-        distance_matrix = np.zeros((len(vids), len(vids)))
-        for i in range(len(vids)):
-            for j in range(i+1, len(vids)):
-                v_start = vids[i]
-                v_end = vids[j]
-                path_pts = self.solve(v_start, v_end)
-                paths[f"{i},{j}"] = path_pts
-                if return_distance_matrix:
-                    distance = [np.linalg.norm(path_pts[i+1] - path_pts[i]) for i in range(len(path_pts)-1)]
-                    distance = np.array(distance).sum()
-                    distance_matrix[i, j] = distance
-                    distance_matrix[j, i] = distance
-        if return_distance_matrix:
-            return paths, distance_matrix
-        else:
-            return paths
-
-    def solve(self, v_start, v_end):
-        path_pts = self.solver.find_geodesic_path(v_start, v_end)
-        return path_pts
-    
-    def solve_vlist(self, vlist):
-        return self.solver.find_geodesic_path_poly(vlist)
-    
-    def solve_path2path(self, vlist0, vlist1):
-        min_distance = 1e10
-        min_pair = None
-        for i in range(len(vlist0)):
-            for j in range(len(vlist1)):
-                path_pts = self.solve(vlist0[i], vlist1[j])                
-                distance = [np.linalg.norm(path_pts[i+1] - path_pts[i]) for i in range(len(path_pts)-1)]
-                distance = np.array(distance).sum()
-                if distance < min_distance:
-                    min_distance = distance
-                    min_pair = [vlist0[i], vlist1[j]]
-        path_pts = self.solve(min_pair[0], min_pair[1])
-        return path_pts, min_distance
-
-
-def get_open_boundary(mesh : trimesh.Trimesh):
-    he_mesh = HETriMesh()
-    he_mesh.init_mesh(mesh.vertices, mesh.faces)
-    boundary_loops = trace_boundary_edges(he_mesh)
-    return boundary_loops
-
-
-def mesh_close_holes(mesh : trimesh.Trimesh):
-    he_mesh = HETriMesh()
-    he_mesh.init_mesh(mesh.vertices, mesh.faces)
-    boundary_loops = trace_boundary_edges(he_mesh)
-    ## close the hole
-    he_mesh, centroid_ids = close_holes(he_mesh, boundary_loops)
-    mesh = trimesh.Trimesh(he_mesh.vs, he_mesh.faces, process=False, maintain_order=True)
-    return mesh, centroid_ids
-
-
-def tsp_segment(mesh : trimesh.Trimesh):
-    
-    patch_mesh_holefilled, centroid_ids = mesh_close_holes(mesh)
-
-    ## GeoPathSolverWrapper
-    path_solver = GeoPathSolverWrapper(patch_mesh_holefilled)
-    paths, distance_matrix = path_solver.solve_all2all(centroid_ids, return_distance_matrix=True)    
-    ## solve TSP to find the order of throughhole
-    tsp_path = solve_tsp(distance_matrix)
-    ## find throughhole path
-    throughhole_path = []
-    for k in range(len(tsp_path)):
-        i = tsp_path[k]
-        j = tsp_path[(k+1)%len(tsp_path)]
-        keys = [f"{i},{j}", f"{j},{i}"]
-        for key in keys:
-            if key in paths:
-                throughhole_path.append(paths[key][1:-1])
-                break
-    return throughhole_path
-
-
-def simple_floodfill_label_mesh(
-    mesh: trimesh.Trimesh, 
-    mask: list
-):  
-    mask = np.array(mask)
-    mask_connected = []
-    patch_mesh = trimesh.Trimesh(mesh.vertices, mesh.faces[mask,:], maintain_order=True, process=False)
-    out = trimesh.graph.connected_component_labels(patch_mesh.face_adjacency)
-    for i in range(out.max()+1):
-        mask_connected.append((mask[out==i]).tolist())
-    return mask_connected
-
-
-"""
-We need to know if a boundary connects to a non-disk patch (i.e., annulus or other)
-Then, the cuts which intersect with this boundary should be booked
-Then, the booked cuts should be connected to form a path
-
-"""
-
-class Path():
-    def __init__(self):
-        self.points = None
-        self.id = None
-        self.dead = False
-    
-    def set_points(self, points):
-        self.points = points
-
-    def build_kdtree(self):
-        assert self.points is not None
-        self.kdtree = KDTree(self.points, metric='euclidean')
-
-    def compute_arc_length(self):
-        assert self.points is not None
-        arc_length = [np.linalg.norm(self.points[i+1] - self.points[i]) for i in range(len(self.points)-1)]
-        arc_length = np.array(arc_length).sum()
-        return arc_length
-    
-    def get_endpoints(self):
-        return [self.points[0], self.points[-1]]
-    
-    def set_dead(self, dead:bool=True):
-        self.dead = dead
-
-
-class Cut(Path):
-    def __init__(self, points, mask_id):
-        super().__init__()
-        self.set_points(points)
-        self.mask_id = mask_id
-        self.connected_boundary_indices = []
-
-    def set_connected_boundary_indices(self, connected_boundary_indices:list):
-        self.connected_boundary_indices = connected_boundary_indices
-
-    
-class Boundary(Path):
-    def __init__(self, points):
-        super().__init__()
-        self.set_points(points)
-        self.build_kdtree()
-        self.connected_cut_indices = []
-        self.mask_ids = set()
-
-    def add_mask_id(self, mask_id:int):
-        assert type(mask_id) == int
-        self.mask_ids.add(mask_id)
-
-    def add_connected_cut_indices(self, cut_id:int):
-        assert type(cut_id) == int
-        self.connected_cut_indices.append(cut_id)
-
-    def set_boundary_vertex_indices_to_mesh(self, boundary_vertex_indices):
-        self.boundary_vertex_indices = boundary_vertex_indices
-
-class PatchTopo():
-    
-    TYPES = ["disk", "annulus", "other"]
-
-    def __init__(self, mask_id:int):
-        self.mask_id = mask_id
-        self.type = None
-        self.boundary_ids = []
-        self.cut_ids = []
-
-    def set_type(self, type_str):
-        assert type_str in self.TYPES
-        self.type = type_str
-
-    def extend_boundary_ids(self, boundary_ids:list):
-        self.boundary_ids.extend(boundary_ids)
-
-    def extend_cut_ids(self, cut_ids:list):
-        self.cut_ids.extend(cut_ids)
 
 class MeshSegmentator():
 
@@ -232,7 +24,9 @@ class MeshSegmentator():
             self, 
             mesh: trimesh.Trimesh,
             mask: list,
-            save_dir:str = None
+            save_dir:str = None,
+            smooth_flag: bool = False,
+            smooth_deg: int = 4,
             ) -> None:
         
         self.save_dir = save_dir
@@ -241,15 +35,18 @@ class MeshSegmentator():
 
         ## proximity
         self.pq_mesh = trimesh.proximity.ProximityQuery(self.mesh)
-
+        self.mesh_path_solver = GeoPathSolverWrapper(self.mesh)
         self.mask = mask
         self.b_close_holes = False
+        self.smooth_flag = smooth_flag
+        self.smooth_deg = smooth_deg
 
         self.patch_topo_list = [] ## list of PatchTopo class objects
         self.boundary_list = [] ## list of Boundary class objects
         self.cut_list = [] ## list of Cut class objects
 
-        logger.success(f"mesh info: num vertices: {self.mesh.vertices.shape}; num faces: {self.mesh.faces.shape}; num masks: len(mask)")
+        logger.info(f'Vertices num: {self.mesh.vertices.shape}; Faces num: {self.mesh.faces.shape}; Masks num: {len(mask)}')
+
 
     def save_paths(self):
         for cut in self.cut_list:
@@ -261,6 +58,7 @@ class MeshSegmentator():
                 continue
             trimesh.PointCloud(boundary.points).export(os.path.join(self.save_dir,f"boundary_{boundary.id}.obj"))
     
+
     def save_mesh(self):
         self.mesh.export(os.path.join(self.save_dir,"mesh_new.obj"))
 
@@ -281,44 +79,111 @@ class MeshSegmentator():
             # input()
         return np.array(min_boundary_indices, dtype=np.int32).tolist()
 
+    
+    def build_unique_boundary(self, mask_id):
+        m = np.array(self.mask[mask_id])
+        he_mesh = HETriMesh()
+        he_mesh.init_mesh(self.mesh.vertices, self.mesh.faces[m,:])
+
+        tmp_mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
+        tmp_mesh.export(os.path.join('tmp', f"mask_{mask_id}.obj"))
+        tmp_boundaries = trace_boundary_edges(he_mesh)
+
+        # patch_topo = PatchTopo(mask_id)
+
+        for i in range(len(tmp_boundaries)):
+            logger.debug(f'Check boundary {i} in mask {mask_id}.')
+            tmp_boundaries[i].append(tmp_boundaries[i][0])
+            boundary = np.array(tmp_boundaries[i], dtype=np.int32)[:,0]
+            
+            ## check if this boundary has been found before
+            unique_set = set(boundary)
+            for j in range(len(self.boundary_list)):
+                boundary_candidate_set = set(self.boundary_list[j].boundary_vertex_indices)
+                unique_set = unique_set.difference(boundary_candidate_set)
+            
+            if len(unique_set) > 0:
+                pmask = np.zeros_like(boundary)
+                for pid in range(len(boundary)):
+                    if boundary[pid] in unique_set:
+                        pmask[pid] = True
+                
+                if pmask.sum() != len(boundary):
+                    logger.debug('\tPart of the boundary has been found before.')
+                    new_boundary = []
+                    pt_num = len(boundary)
+                    pid = 0
+                    while pmask[pid]:
+                        pid += 1
+
+                    while not pmask[pid]:
+                        pid += 1
+                    
+                    new_boundary.append(boundary[(pid-1+pt_num)%pt_num])
+                    while pmask[pid]:
+                        new_boundary.append(boundary[pid])
+                        pid = (pid + 1) % pt_num
+                    new_boundary.append(boundary[pid])
+                    boundary = new_boundary
+                else:
+                    logger.debug('\tThe complete boundary is unique.')
+                    boundary = boundary.tolist()
+
+                boundary_obj =  Boundary(self.mesh.vertices[boundary])
+                boundary_obj.set_boundary_vertex_indices_to_mesh(boundary)
+                boundary_obj.id = len(self.boundary_list)
+                self.boundary_list.append(boundary_obj)
+            else:
+                logger.debug('\tBoundary already exists. Skip!')
+
 
     def build_mask_structure(self, mask_id):
         m = np.array(self.mask[mask_id])
         he_mesh = HETriMesh()
         he_mesh.init_mesh(self.mesh.vertices, self.mesh.faces[m,:])
+
+        tmp_mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
+        tmp_mesh.export(os.path.join('tmp', f"mask_{mask_id}.obj"))
         tmp_boundaries = trace_boundary_edges(he_mesh)
 
         patch_topo = PatchTopo(mask_id)
 
         ## classify the patch type and cut
         if len(tmp_boundaries) == 1:
-            logger.success(f"disk topology --- {mask_id}")
+            logger.info(f"disk topology --- {mask_id}")
             patch_topo.set_type('disk')
         elif len(tmp_boundaries) == 2:
-            logger.success(f"annulus topology --- {mask_id}")
+            logger.info(f"annulus topology --- {mask_id}")
             patch_topo.set_type('annulus')
         elif len(tmp_boundaries) > 2:
-            logger.success(f"non-disk non-annulus topology --- {mask_id}")
+            logger.info(f"non-disk non-annulus topology --- {mask_id}")
             patch_topo.set_type('other')
         else:
             logger.error("Error: no boundary found")
 
         
         for i in range(len(tmp_boundaries)):
+            tmp_boundaries[i].append(tmp_boundaries[i][0])
             boundary = np.array(tmp_boundaries[i], dtype=np.int32)[:,0]
-            boundary = np.hstack([boundary, tmp_boundaries[i][-1][1]])
             ## check if this boundary has been found before
             b_found = -1
+            boundary_set = set(boundary)
             for j in range(len(self.boundary_list)):
-                if set(boundary) == set(self.boundary_list[j].boundary_vertex_indices):
+                boundary_candidate_set = set(self.boundary_list[j].boundary_vertex_indices)
+                
+                if boundary_set == boundary_candidate_set:
                     b_found = self.boundary_list[j].id
                     self.boundary_list[j].add_mask_id(mask_id)
                     break
+
+                # intersection_res = boundary_set.intersection(boundary_candidate_set)
+                # if len(intersection_res) > 0:
+
             if b_found == -1:
-                boundary_obj = Boundary(self.mesh.vertices[boundary])
-                boundary_obj.set_boundary_vertex_indices_to_mesh(boundary)
-                boundary_obj.add_mask_id(mask_id)
+                boundary_obj =  Boundary(self.mesh.vertices[boundary])
+                boundary_obj.set_boundary_vertex_indices_to_mesh(boundary.tolist())
                 boundary_obj.id = len(self.boundary_list)
+                boundary_obj.add_mask_id(mask_id)
                 self.boundary_list.append(boundary_obj)
                 patch_topo.extend_boundary_ids([boundary_obj.id])
             else:
@@ -332,10 +197,10 @@ class MeshSegmentator():
         m = np.array(self.mask[mask_id], dtype=np.int32)
         patch_mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
         paths, distance_matrix = compute_distance_matrix(patch_mesh, b_close_holes=False)
-        print(distance_matrix)
+        # print(distance_matrix)
         ## solve TSP
         tsp_path = solve_tsp(distance_matrix)
-        print(tsp_path)
+        logger.debug(f'TSP Path: {tsp_path}')
 
         throughhole_paths = []
         for k in range(len(tsp_path)):
@@ -349,9 +214,114 @@ class MeshSegmentator():
         return throughhole_paths
     
 
-    def cut_mask(self, mask_id):
-        logger.success("cut mask")
-        cuts = self.cut_through_holes(mask_id)
+    def cut_annulus_by_two_furthest_pts(self, mask_id):
+        m = np.array(self.mask[mask_id], dtype=np.int32)
+        patch_mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
+        path_solver = GeoPathSolverWrapper(patch_mesh)
+        boundary_loops = get_open_boundary(patch_mesh)
+
+        boundary_ends = []
+        # find the farthest point on the boundary
+        for b_idx in range(2):
+            queries = np.array(boundary_loops[b_idx], dtype=np.int32)[:,0]
+            v = patch_mesh.vertices[queries]
+            pair_dist = cdist(v, v)
+            a0, a1 = np.unravel_index(np.argmax(pair_dist), pair_dist.shape)
+            a0, a1 = queries[a0], queries[a1]
+            boundary_ends.append([a0, a1])
+        
+        boundary_ends = np.array(boundary_ends)
+        v = patch_mesh.vertices[boundary_ends.flatten()]
+        pair_dist = cdist(v[:2], v[2:])
+        dist_sum_0 = pair_dist[0, 0] + pair_dist[1, 1]
+        dist_sum_1 = pair_dist[0, 1] + pair_dist[1, 0]
+
+        a0, a1 = boundary_ends[0]
+        if dist_sum_0 > dist_sum_1:
+            b1, b0 = boundary_ends[1]
+        else:
+            b0, b1 = boundary_ends[1]
+        
+        path_pts0 = path_solver.solve(a0, b0)
+        path_pts1 = path_solver.solve(a1, b1)
+        
+        throughhole_paths = [path_pts0, path_pts1]
+        
+        return throughhole_paths
+
+    
+    def cut_annulus_by_one_furthest_pts_and_propogation(self, mask_id):
+        bids = self.patch_topo_list[mask_id].boundary_ids
+        assert len(bids) == 2, "Num of boundary_loops in annulus should be 2"
+        
+        found_fixed_indices = False
+        for i in range(2):
+            if len(self.boundary_list[bids[i]].fixed_indices) == 2:
+                logger.debug(f"Boundary {bids[i]} in mask {mask_id} has two fixed points. Propogate cuts from the fixed points.")
+                found_fixed_indices = True
+                bidx, bidx_c = bids[i], bids[1-i]
+                break
+        
+        if not found_fixed_indices:
+            logger.debug(f"Annulus {mask_id} has no fixed points. Cut by two furthest points.")
+            # find the farthest point on the boundary
+            bidx, bidx_c = bids[0], bids[1]
+            v = self.boundary_list[bidx].points
+            pair_dist = cdist(v, v)
+            a0, a1 = np.unravel_index(np.argmax(pair_dist), pair_dist.shape)
+            a0 = self.boundary_list[bidx].boundary_vertex_indices[a0]
+            a1 = self.boundary_list[bidx].boundary_vertex_indices[a1]
+        else:
+            a0, a1 = tuple(self.boundary_list[bidx].fixed_indices)
+        
+        if len(self.boundary_list[bidx_c].fixed_indices) > 0:
+            logger.warning(f"Complement boundary {bidx_c} in mask {mask_id} has fixed points. Propogate cuts from the fixed points.")
+        
+        a0_boundary_dist = np.inf
+        a1_boundary_dist = np.inf
+        a0_boundary_path = None
+        a1_boundary_path = None
+        a0_boundary_p = None
+        a1_boundary_p = None
+        for p in self.boundary_list[bidx_c].boundary_vertex_indices:
+
+            path = self.mesh_path_solver.solve(a0, p)
+            dist = [np.linalg.norm(path[i+1] - path[i]) for i in range(len(path)-1)]
+            dist = np.array(dist).sum()
+
+            if dist < a0_boundary_dist:
+                a0_boundary_dist = dist
+                a0_boundary_path = path
+                a0_boundary_p = p
+
+            path = self.mesh_path_solver.solve(a1, p)
+            dist = [np.linalg.norm(path[i+1] - path[i]) for i in range(len(path)-1)]
+            dist = np.array(dist).sum()
+
+            if dist < a1_boundary_dist:
+                a1_boundary_dist = dist
+                a1_boundary_path = path
+                a1_boundary_p = p
+        
+        # Update boundary fixed indices
+        self.boundary_list[bidx].fixed_indices.add(a0)
+        self.boundary_list[bidx].fixed_indices.add(a1)
+        self.boundary_list[bidx_c].fixed_indices.add(a0_boundary_p)
+        self.boundary_list[bidx_c].fixed_indices.add(a1_boundary_p)
+
+        throughhole_paths = [a0_boundary_path, a1_boundary_path]
+        
+        return throughhole_paths
+    
+
+    def cut_mask(self, mask_id, annulus_cut_flag:bool = False):
+        if annulus_cut_flag:
+            logger.debug(f"Cut annulus mask, mask id {mask_id}")
+            cuts = self.cut_annulus_by_two_furthest_pts(mask_id)
+            # cuts = self.cut_annulus_by_one_furthest_pts_and_propogation(mask_id)
+        else:
+            logger.debug(f"Cut mask, mask id {mask_id}")
+            cuts = self.cut_through_holes(mask_id)
 
         cut_obj_list = []
         for cut_pts in cuts:
@@ -373,17 +343,24 @@ class MeshSegmentator():
                 self.boundary_list[boundary_id].add_connected_cut_indices(cut_obj.id)
         
 
-    def align_cuts(self, boundary_obj:Boundary):
+    def align_cuts(self, boundary_obj: Boundary):
         cut_ids = boundary_obj.connected_cut_indices
-        logger.success(f"need align; cut ids: {cut_ids}")
+        logger.debug(f"Align cuts on Boundary {boundary_obj.id}; cut ids: {cut_ids}")
 
-        cut_list = [self.cut_list[i] for i in cut_ids]
-    
+        # if boundary_obj.id == 2:
+            # print('')
         extended_cut_dict = {}
-        for i in range(len(cut_list)-1):
-            for j in range(i+1, len(cut_list)):
-                cut0 = cut_list[i]
-                cut1 = cut_list[j]
+        boundary_len_list = [
+            np.linalg.norm(boundary_obj.points[i+1] - boundary_obj.points[i]) 
+            for i in range(len(boundary_obj.points)-1)
+        ]
+        boundary_len = np.array(boundary_len_list).sum()
+        boundary_len_accum = np.array(boundary_len_list).cumsum()
+        for i in range(len(cut_ids)-1):
+            for j in range(i+1, len(cut_ids)):
+                
+                cut0 = self.cut_list[cut_ids[i]]
+                cut1 = self.cut_list[cut_ids[j]]
                 if cut0.mask_id == cut1.mask_id:
                    continue
                 pair_cuts = [cut0.id, cut1.id] if cut0.id < cut1.id else [cut1.id, cut0.id]
@@ -393,71 +370,83 @@ class MeshSegmentator():
                     extended_cut_dict[keystr]['cutpair'] = pair_cuts
                     extended_cut_dict[keystr]['distance'] = 1e10
                     extended_cut_dict[keystr]['points'] = []
+
+                    end_points = []
+                    if cut0.connected_boundary_indices[0] == boundary_obj.id:
+                        end_points.extend(reversed(cut0.get_endpoints()))
+                    else:
+                        end_points.extend(cut0.get_endpoints())
+                    
+                    if cut1.connected_boundary_indices[0] == boundary_obj.id:
+                        end_points.extend(cut1.get_endpoints())
+                    else:
+                        end_points.extend(reversed(cut1.get_endpoints()))
+
                     extended_cut_dict[keystr]['boundary'] = set(cut0.connected_boundary_indices).union(set(cut1.connected_boundary_indices))
                     extended_cut_dict[keystr]['boundary'].difference_update(set([boundary_obj.id]))
 
+                    d, vertex_ids = self.pq_mesh.vertex(np.array(end_points))
+                    if vertex_ids[1] != vertex_ids[2]:
+                        
+                        # Option1: Computing Geodesic, requires 40GB Mem
+                        # path_pts = self.mesh_path_solver.solve(*(vertex_ids[1:3].tolist()))
+                        # dist = [np.linalg.norm(path_pts[i+1] - path_pts[i]) for i in range(len(path_pts)-1)]
+                        # dist = np.array(dist).sum()
+                        # path_mid = path_pts[len(path_pts)//2]
+                        # end_points[1] = path_mid
 
+                        # Option2: Explicitly find the mid point on the boundary
+                        vpos1 = boundary_obj.boundary_vertex_indices.index(vertex_ids[1])
+                        vpos2 = boundary_obj.boundary_vertex_indices.index(vertex_ids[2])
+                        vpos_min = min(vpos1, vpos2)
+                        vpos_max = max(vpos1, vpos2)
+                        dist = boundary_len_accum[vpos_max] - boundary_len_accum[vpos_min]
+                        
+                        if dist < boundary_len - dist:
+                            mid_pos = (vpos_min + vpos_max) // 2
+                        else:
+                            dist = boundary_len - dist
+                            n = len(boundary_len_list)
+                            mid_pos = ((n - vpos_max + vpos_min) // 2 + vpos_max) % n
+                        
+                        extended_cut_dict[keystr]['distance'] = dist
+                        vertex_ids[1] = boundary_obj.boundary_vertex_indices[mid_pos]
+                    else:
+                        extended_cut_dict[keystr]['distance'] = 0
 
-        ## find the shortest path between the two cuts
-        path_solver = GeoPathSolverWrapper(self.mesh)
-        for k, v in extended_cut_dict.items():
-            print()
-            print("cutpair", k)
-            points = []
-            cut0 = self.cut_list[v['cutpair'][0]]
-            cut1 = self.cut_list[v['cutpair'][1]]
+                    vertex_ids = np.delete(vertex_ids, 2, axis=0)
+                    extended_cut_dict[keystr]['points'] = []
+                    for vid in range(1, 3):
+                        extended_cut_dict[keystr]['points'].append(
+                            self.mesh_path_solver.solve(vertex_ids[vid-1], vertex_ids[vid])
+                        )
 
-            queries = [cut0.points[0], cut0.points[-1]]
-            d, _ = boundary_obj.kdtree.query(queries, k=1, return_distance=True)
-            d = d[:,0]
-            if d[0] < d[1]:
-                ## flip
-                points.append(cut0.points[-1]) ## far
-                points.append(cut0.points[0]) ## near
-            else:
-                ## not flip
-                points.append(cut0.points[0])
-                points.append(cut0.points[-1])
-
-            queries = [cut1.points[0], cut1.points[-1]]
-            d, _ = boundary_obj.kdtree.query(queries, k=1, return_distance=True)
-            d = d[:,0]
-            if d[0] > d[1]:
-                ## flip
-                points.append(cut1.points[-1]) ## near
-                points.append(cut1.points[0]) ## far
-            else:
-                ## not flip
-                points.append(cut1.points[0])
-                points.append(cut1.points[-1])
-            
-            d, vertex_ids = self.pq_mesh.vertex(np.array(points))
-
-            path_pts = path_solver.solve_vlist(vertex_ids)
-            dist = [np.linalg.norm(path_pts[i+1] - path_pts[i]) for i in range(len(path_pts)-1)]
-            dist = np.array(dist).sum()
-            v['distance'] = dist
-            v['points'] = path_pts
-            # print(vertex_ids, dist)
-            # trimesh.PointCloud(path_pts).export(os.path.join(self.save_dir,f"align_cuts_{k}.obj"))
-
-        print(extended_cut_dict)
         ## sort extended_cut_dict by distance key
         extended_cut_dict = sorted(extended_cut_dict.items(), key=lambda x: x[1]['distance'])
-        print(extended_cut_dict)
+        # print(extended_cut_dict)
 
         ## keep the shortest half of cuts
         cnt = 0
         max_keep = len(extended_cut_dict)//2
+        selected_cut = set()
         for k, v in extended_cut_dict:
-            cut = Cut(v['points'], -1)
-            cut.set_connected_boundary_indices(list(v['boundary']))
-            cut.id = len(self.cut_list)
-            self.cut_list.append(cut)
 
-            for cut_id in v['cutpair']:
-                self.cut_list[cut_id].set_dead()
+            cut0_id = v['cutpair'][0]
+            if self.cut_list[cut0_id].connected_boundary_indices[0] == boundary_obj.id:
+                self.cut_list[cut0_id].set_points(v['points'][0][::-1])
+            else:
+                self.cut_list[cut0_id].set_points(v['points'][0])
 
+            cut1_id = v['cutpair'][1]
+            if self.cut_list[cut1_id].connected_boundary_indices[0] == boundary_obj.id:
+                self.cut_list[cut1_id].set_points(v['points'][1])
+            else:
+                self.cut_list[cut1_id].set_points(v['points'][1][::-1])
+
+            selected_cut.add(cut0_id)
+            selected_cut.add(cut1_id)
+
+            logger.info(f'Align two cuts {v["cutpair"]}')
             cnt += 1
             if cnt >= max_keep:
                 break
@@ -556,17 +545,54 @@ class MeshSegmentator():
             cnt += 1
             if cnt >= max_keep:
                 break
+    
+    def split_mesh_with_boundaries(self):
+        for cut in self.boundary_list:
+            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, 0.15)
+            self.mesh = new_mesh
+            self.mask = new_mask
+
+        self.mesh_path_solver = GeoPathSolverWrapper(self.mesh)
+        self.pq_mesh = trimesh.proximity.ProximityQuery(self.mesh)
 
 
     def split_mesh_with_cuts(self):
         for cut in self.cut_list:
             if cut.dead:
                 continue
-            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces)
+            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, 0.2)
             self.mesh = new_mesh
             self.mask = new_mask
-            print("add a cut")
 
+        self.mesh_path_solver = GeoPathSolverWrapper(self.mesh)
+        self.pq_mesh = trimesh.proximity.ProximityQuery(self.mesh)
+
+
+    def smooth_boundaries(self):
+        logger.info('Smooth boundaries.')
+        for i in range(len(self.boundary_list)):
+
+            # print("boundary", i, self.boundary_list[i].points)
+            pt_num = len(self.boundary_list[i].points)
+            sample_pt_num = max(self.smooth_deg, int(pt_num * 0.1))
+            logger.debug(f'\tBoundary {i} has {pt_num} points. Sample {sample_pt_num} points.')
+            sampled_ids = np.linspace(0, pt_num-1, sample_pt_num, dtype=np.int32).tolist()
+            for fixed_pt in list(self.boundary_list[i].fixed_indices):
+                fixed_pt_idx = self.boundary_list[i].boundary_vertex_indices.index(fixed_pt)
+                insert_pos = bisect.bisect_left(sampled_ids, fixed_pt_idx)
+                if sampled_ids[insert_pos] != fixed_pt_idx:
+                    sampled_ids.insert(insert_pos, fixed_pt_idx)
+            sampled_pts = self.boundary_list[i].points[sampled_ids]
+            d, vertex_ids = self.pq_mesh.vertex(np.array(sampled_pts))
+            new_points = []
+            for j in range(1, len(vertex_ids)):
+                path_pts = self.mesh_path_solver.solve(vertex_ids[j-1], vertex_ids[j])
+                if j == 1:
+                    new_points.extend(path_pts) # Add the first pt to make a loop
+                else:
+                    new_points.extend(path_pts[1:])
+
+            self.boundary_list[i].points = np.array(new_points)
 
 
     def __call__(self, b_close_holes:bool = None):
@@ -580,43 +606,88 @@ class MeshSegmentator():
             mask_connected.extend(simple_floodfill_label_mesh(self.mesh, m))
         self.mask = mask_connected
 
+        if self.smooth_flag:
+            for i in range(len(self.mask)):
+                self.build_unique_boundary(i)
+                # self.build_mask_structure(i)
+
+            for i in range(len(self.boundary_list)):
+                bi = set(self.boundary_list[i].boundary_vertex_indices)
+                for j in range(i+1, len(self.boundary_list)):
+                    bj = set(self.boundary_list[j].boundary_vertex_indices)
+                    inter_pids = bi.intersection(bj)
+                    if len(inter_pids) == 0:
+                        continue
+                    
+                    logger.info(f'Boundary {i} and {j} share {len(inter_pids)} points. Keep them.')
+
+                    for inter_pid in inter_pids:
+                        self.boundary_list[i].fixed_indices.add(inter_pid)
+                        self.boundary_list[j].fixed_indices.add(inter_pid)
+
+            self.smooth_boundaries()
+            self.split_mesh_with_boundaries()
+
+            # Recompute the mask
+            picked_pt_ids = []
+            for boundary in self.boundary_list:
+                _, vids = self.pq_mesh.vertex(boundary.points)
+                picked_pt_ids.append(vids.tolist())
+
+            logger.info(f'Add boundaries {len(self.boundary_list)} for floodfill.')
+            # convert boundary edges to mesh edges
+            self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
+
+
+        # Build boundary and mask patches, Cut masks
+        self.boundary_list = []
+        self.patch_topo_list = []
         for i in range(len(self.mask)):
             mask_type = self.build_mask_structure(i)
             if mask_type == 'other':
                 self.cut_mask(i)
+            elif mask_type == 'annulus':
+                self.cut_mask(i, annulus_cut_flag=True)
 
-        logger.success("align cuts between two non-disk, non-annulus patches")
+        # Align endpoints
         for boundary_obj in self.boundary_list:
-            # print()
-            # print("boundary id: ", boundary_obj.id)
-            # print("boundary mask ids: ")
+            # if boundary_obj.id != 6:
+                # continue
             mask_ids = list(boundary_obj.mask_ids)
-            if self.patch_topo_list[mask_ids[0]].type == 'other' and self.patch_topo_list[mask_ids[1]].type == 'other':
+            if len(mask_ids) != 2:
+                logger.warning(f'A boundary doesn\'t connect to two patches! {mask_ids}. Skip!')
+                continue            
+            if self.patch_topo_list[mask_ids[0]].type == 'disk' or self.patch_topo_list[mask_ids[1]].type == 'disk':
+                logger.info('One patch is a disk. Skip!')
+                continue
+            else:
+                logger.info(f'Align a {self.patch_topo_list[mask_ids[0]].type} and {self.patch_topo_list[mask_ids[1]].type}')
+                if self.patch_topo_list[mask_ids[0]].type == 'other':
+                    print("mask_ids[0]", mask_ids[0])
                 self.align_cuts(boundary_obj)
 
-        logger.success("cut annulus patches")
-        for patch in self.patch_topo_list:
-            if patch.type == "annulus":
-                self.cut_annulus_aligned(patch)
 
+        # logger.success("cut annulus patches")
+        # for patch in self.patch_topo_list:
+        #     if patch.type == "annulus":
+        #         self.cut_annulus_aligned(patch)
 
-        ## 
         self.split_mesh_with_cuts()
 
         ## 
-        pq_mesh = trimesh.proximity.ProximityQuery(self.mesh)
         picked_pt_ids = []
         for cut in self.cut_list:
             if cut.dead:
                 continue
-            _, vids = pq_mesh.vertex(cut.points)
+            _, vids = self.pq_mesh.vertex(cut.points)
             picked_pt_ids.append(vids.tolist())
         for boundary in self.boundary_list:
-            _, vids = pq_mesh.vertex(boundary.points)
+            _, vids = self.pq_mesh.vertex(boundary.points)
             picked_pt_ids.append(vids.tolist())
+
+        logger.info(f'Add cuts {len(self.cut_list)} and boundaries {len(self.boundary_list)} for floodfill.')
         ## convert cut edges to mesh edges
         self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
-
 
 
 if __name__ == "__main__":
@@ -636,7 +707,6 @@ if __name__ == "__main__":
     fpath = f"./data/segmentation_data/*/{shape_id}.off"
     mesh, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"))
     mesh.export(os.path.join(save_dir,"mesh.obj"))
-
 
     segmentor = MeshSegmentator(mesh, mask, save_dir)
     segmentor(b_close_holes=False)

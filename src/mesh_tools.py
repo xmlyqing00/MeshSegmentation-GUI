@@ -50,7 +50,7 @@ def find_intersection_pairs(queries, edge_verts, intersection_merged_threshold):
             intersections.append((qid, intersection_eid))
             queries_for_insert.append(queries[qid])
 
-    logger.debug(f'Intersection ignore count: {intersection_ignore_cnt}')
+    logger.debug(f'Intersection {len(eid_set)}, ignore count: {intersection_ignore_cnt}')
 
     return queries_for_insert, intersections
 
