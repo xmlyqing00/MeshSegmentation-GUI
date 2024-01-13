@@ -42,11 +42,11 @@ def write_obj_file(filename, V, F=None, C=None, N=None, vid_start=1):
 
 class ComplexBuilder():
 
-    def __init__(self, base_mesh, mask, savefolder='out') -> None:
+    def __init__(self, base_mesh, mask) -> None:
         # self.base = base_mesh
         self.mask = mask
-        self.savefolder = savefolder
         self.base = normalize_data(base_mesh)
+        self.graph = None
        
 
     def init_scaffold_vertices(self):
@@ -293,9 +293,13 @@ class ComplexBuilder():
                     cell.append(all_corner_ids.index(arc['corner_ids'][0]))
             graph['cells'].append(cell)
         
+        self.graph = graph
         return graph
 
-
+    def save_complex(self, savefolder):
+        filename = os.path.join(savefolder, 'topology_graph.json')
+        with open(filename, 'w') as f:
+            json.dump(self.graph, f)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Modeling 3D shapes with neural patches")

@@ -12,3 +12,5 @@ tmp/
 
 *.obj
 *.ply
+
+data_built/

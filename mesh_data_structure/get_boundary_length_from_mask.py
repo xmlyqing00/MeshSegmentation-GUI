@@ -111,12 +111,12 @@ def get_boundary_length_from_mask(mesh, mask, graph):
                 arc_length = np.sum(boundary_length[min_dist_ids[i]:])
                 arc_length += np.sum(boundary_length[0:min_dist_ids[j]])
             else:
-                print(min_dist_ids[i], min_dist_ids[j])
+                # print(min_dist_ids[i], min_dist_ids[j])
                 arc_length = np.sum(boundary_length[min_dist_ids[i]:min_dist_ids[j]])
             arc_lengths.append(arc_length)
 
-        print(cells[id])
-        print(min_dist_ids)
+        # print(cells[id])
+        # print(min_dist_ids)
         
         # print(id)
         # print("arc_length", arc_lengths)
@@ -174,8 +174,8 @@ def get_boundary_length_from_mask_nonmanifold(mesh, mask, graph):
                 arc_length = np.sum(boundary_length[min_dist_ids[i]:min_dist_ids[j]])
             arc_lengths.append(arc_length)
 
-        print(cells[id])
-        print(min_dist_ids)
+        # print(cells[id])
+        # print(min_dist_ids)
         
         arc_lengths = np.array(arc_lengths)
         arc_lengths = arc_lengths / np.sum(arc_lengths)
