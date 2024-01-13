@@ -3,7 +3,7 @@ import trimesh
 import numpy as np
 from mesh_data_structure.utils import GeoPathSolverWrapper, get_open_boundary
 from scipy.spatial.distance import cdist
-from vedo import utils, show, Plotter, Arrows, Sphere, Spheres, Text2D, Line
+from vedo import utils, show, Plotter, Arrows, Sphere, Spheres, Text2D, Line, write
 
 
 def vis_path(path, plt, c):
@@ -12,7 +12,7 @@ def vis_path(path, plt, c):
     plt.render()
 
 
-mesh = trimesh.load('tmp/mask_3.obj')
+mesh = trimesh.load('tmp/obj_3_mask_3.obj')
 path_solver = GeoPathSolverWrapper(mesh)
 boundary_loops = get_open_boundary(mesh)
 
@@ -64,5 +64,12 @@ for p in vids:
 vis_path(a0_boundary_path, plt, 'r8')
 vis_path(a1_boundary_path, plt, 'g8')
 
+
 plt.show()
+
+vedo_mesh_path = 'tmp/obj_3_mask_3_viz.x3d'
+# write(vedo_mesh, vedo_mesh_path)
+plt.export(vedo_mesh_path)
+
 plt.close()
+
