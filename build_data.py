@@ -90,7 +90,7 @@ if __name__ == '__main__':
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
     
-    texture_img = Image.open(f'./assets/checkerboard.png')
+    texture_img = Image.open(f'./assets/uv_color.png')
 
     ## root folder
     root_dir = f'./data_built/{args.model_name}'

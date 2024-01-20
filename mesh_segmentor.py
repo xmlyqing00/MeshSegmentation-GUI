@@ -9,12 +9,13 @@ from scipy.spatial.distance import cdist
 import shutil
 import argparse
 import bisect
+from PIL import Image
 
 from loguru import logger
 from mesh_data_structure.halfedge_mesh import HETriMesh
 from mesh_data_structure.utils import trace_boundary_edges, close_holes, compute_distance_matrix, convert_list_to_string, simple_floodfill_label_mesh, GeoPathSolverWrapper, get_open_boundary
 from mesh_data_structure.components import PatchTopo, Boundary, Cut
-
+from igl_parameterization import compute_harmonic_scalar_field
 from src.mesh_tools import split_mesh, split_mesh_by_path, floodfill_label_mesh
 
 
@@ -44,7 +45,7 @@ class MeshSegmentator():
         self.patch_topo_list = [] ## list of PatchTopo class objects
         self.boundary_list = [] ## list of Boundary class objects
         self.cut_list = [] ## list of Cut class objects
-
+        self.texture_img = Image.open(f'./assets/uv_color.png')
         logger.info(f'Vertices num: {self.mesh.vertices.shape}; Faces num: {self.mesh.faces.shape}; Masks num: {len(mask)}')
 
 
@@ -313,12 +314,135 @@ class MeshSegmentator():
         
         return throughhole_paths
     
+    
+    def cut_annulus_by_one_furthest_pts_and_scalar_field(self, mask_id):
+        bids = self.patch_topo_list[mask_id].boundary_ids
+        assert len(bids) == 2, "Num of boundary_loops in annulus should be 2"
+        
+        if mask_id == 4:
+            print(' ')
+        found_fixed_indices = False
+        for i in range(2):
+            if len(self.boundary_list[bids[i]].fixed_indices) == 2:
+                logger.debug(f"Boundary {bids[i]} in mask {mask_id} has two fixed points. Propogate cuts from the fixed points.")
+                found_fixed_indices = True
+                bidx, bidx_c = bids[i], bids[1-i]
+                break
+        
+        if not found_fixed_indices:
+            logger.debug(f"Annulus {mask_id} has no fixed points. Cut by two furthest points.")
+            # find the farthest point on the boundary
+            bidx, bidx_c = bids[0], bids[1]
+            v = self.boundary_list[bidx].points
+            pair_dist = cdist(v, v)
+            a0, a1 = np.unravel_index(np.argmax(pair_dist), pair_dist.shape)
+            a0 = self.boundary_list[bidx].boundary_vertex_indices[a0]
+            a1 = self.boundary_list[bidx].boundary_vertex_indices[a1]
+        else:
+            a0, a1 = tuple(self.boundary_list[bidx].fixed_indices)
+        
+        if len(self.boundary_list[bidx_c].fixed_indices) > 0:
+            logger.warning(f"Complement boundary {bidx_c} in mask {mask_id} has fixed points. Propogate cuts from the fixed points.")
+        
+        m = np.array(self.mask[mask_id])
+        mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
+        uv, boundary_list_local = compute_harmonic_scalar_field(mesh)
+        uv[:, 1] = 0
+        uv_visuals = trimesh.visual.texture.TextureVisuals(
+            uv=uv, 
+            image=self.texture_img
+        )
+        mesh.visual = uv_visuals
+        mesh.export(f'tmp/{mask_id}_scalar_field.obj')
+        local_pq_mesh = trimesh.proximity.ProximityQuery(mesh)
 
+        # localize a0, a1
+        d, a0_local = local_pq_mesh.vertex(self.mesh.vertices[a0])
+        d, a1_local = local_pq_mesh.vertex(self.mesh.vertices[a1])
+
+        if abs(uv[a0_local, 0] - 1) < 1e-8:
+            uv = 1 - uv
+        
+        sample_num = 20
+        corner_ids = [a0_local, a1_local]
+        vid_c = []
+        throughhole_paths = []
+        for cid, corner_id in enumerate(corner_ids):
+
+            point_cur = {
+                'x': mesh.vertices[corner_id],
+                'u': uv[corner_id, 0]
+            }
+            cut_path = [point_cur['x']]
+
+            faces = mesh.vertex_faces[corner_id]
+
+            while True:
+                
+                mask = faces != -1
+                unique_faces = faces[mask]
+                related_edges = mesh.faces_unique_edges[unique_faces]
+                related_edges = np.unique(related_edges)
+                
+                sample_pts = []
+                for eid in related_edges:
+
+                    e = mesh.edges_unique[eid]
+                    samples = np.linspace(0, 1, sample_num)
+                    for t in samples:
+                        sample_x = mesh.vertices[e[0]] * (1-t) + mesh.vertices[e[1]] * t
+                        sample_u = uv[e[0], 0] * (1-t) + uv[e[1], 0] * t
+                        
+                        d_x_norm = np.linalg.norm(sample_x - point_cur['x'])
+                        d_u_norm = sample_u - point_cur['u']
+
+                        if abs(d_x_norm) < 1e-7:
+                            derivative = 0
+                        else:
+                            derivative = d_u_norm / d_x_norm
+
+                        sample_pts.append({
+                            'x': sample_x,
+                            'u': sample_u,
+                            'derivative': derivative,
+                            't': t,
+                            'eid': eid
+                        })
+
+                sample_pts = sorted(sample_pts, key=lambda x: x['derivative'], reverse=True)
+                point_next = sample_pts[0]
+                cut_path.append(point_next['x'])
+
+                if abs(point_next['u'] - 1) < 1e-7:
+                    d, vid = self.pq_mesh.vertex(point_next['x'])
+                    vid_c.append(vid)
+                    break
+                else:
+                    point_cur = point_next
+                    e = mesh.edges_unique[point_next['eid']]
+                    # adj_index = mesh.face_adjacency_edges_tree.query([e])[1]
+                    # faces = mesh.face_adjacency[adj_index]
+                    faces = mesh.vertex_faces[e].flatten()
+            
+            throughhole_paths.append(np.array(cut_path))
+            # cut_path = np.array(cut_path)
+        
+        # Update boundary fixed indices
+        self.boundary_list[bidx].fixed_indices.add(a0)
+        self.boundary_list[bidx].fixed_indices.add(a1)
+        self.boundary_list[bidx_c].fixed_indices.add(vid_c[0])
+        self.boundary_list[bidx_c].fixed_indices.add(vid_c[1])
+
+        # throughhole_paths = [a0_boundary_path, a1_boundary_path]
+        
+        return throughhole_paths
+    
     def cut_mask(self, mask_id, annulus_cut_flag:bool = False):
         if annulus_cut_flag:
             logger.debug(f"Cut annulus mask, mask id {mask_id}")
-            cuts = self.cut_annulus_by_two_furthest_pts(mask_id)
+            # cuts = self.cut_annulus_by_two_furthest_pts(mask_id)
             # cuts = self.cut_annulus_by_one_furthest_pts_and_propogation(mask_id)
+            cuts = self.cut_annulus_by_one_furthest_pts_and_scalar_field(mask_id)
         else:
             logger.debug(f"Cut mask, mask id {mask_id}")
             cuts = self.cut_through_holes(mask_id)

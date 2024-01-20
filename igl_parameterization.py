@@ -5,6 +5,8 @@ sys.path.append(os.getcwd())
 import numpy as np
 import igl
 from meshplot import plot, subplot, interact
+from mesh_data_structure.utils import GeoPathSolverWrapper, get_open_boundary
+
 
 def loadtxt_crns(filename):
     with open(filename, "r") as f:
@@ -76,7 +78,7 @@ def map_to_ngon(v, list_bnd, crn_ids):
 
 def parameterize_mesh(v, f, crn_ids):
     bnd = igl.boundary_loop(f)
-    print(bnd.shape)
+    print(bnd)
     bnd_list = bnd.tolist()
 
     for cid in crn_ids:
@@ -88,5 +90,38 @@ def parameterize_mesh(v, f, crn_ids):
     bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids)
     bnd = np.array(bnd_list, dtype=np.int64).reshape(-1,1)
     ## Harmonic parametrization for the internal vertices
+    print('bnd', bnd.shape)
+    print('bnd_uv', bnd_uv.shape)
     uv = igl.harmonic(v, f, bnd, bnd_uv, 1)
     return uv, bnd_uv, endpoints, list_boundary_length, bnd_list
+
+
+def compute_harmonic_scalar_field(mesh, boundary_list=None):
+    
+    tmp_boundary_list = get_open_boundary(mesh)
+    # print('boundary', boundary_list)
+    assert len(tmp_boundary_list) == 2, "Num of boundary_loops in annulus should be 2"
+
+    boundary_list = []
+    for bnds in tmp_boundary_list:
+        boundary_list.append(np.array(bnds)[:, 0])
+
+    bnd_uvs = []
+    for bidx, bnds in enumerate(boundary_list):
+        bnd_num = len(bnds)
+        bnd_uv = np.zeros((bnd_num, 2))
+        bnd_uv[:, 0] = bidx
+        bnd_uv[:, 1] = np.linspace(0, 1, bnd_num)
+        bnd_uvs.append(bnd_uv)
+    
+    bnd_uvs = np.concatenate(bnd_uvs, axis=0).astype(np.float64)
+    bnds = np.concatenate(boundary_list, axis=0).astype(np.int64)
+    
+    # print(bnds, bnd_uvs)
+    uv = igl.harmonic(mesh.vertices, mesh.faces, bnds, bnd_uvs, 1)
+    # print(uv)
+
+    return uv, boundary_list
+
+    # bnd = igl.boundary_loop(f)
+    # print(bnd)
