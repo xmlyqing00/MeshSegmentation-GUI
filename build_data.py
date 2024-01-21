@@ -90,7 +90,7 @@ if __name__ == '__main__':
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
     
-    texture_img = Image.open(f'./assets/checkerboard.png')
+    texture_img = Image.open(f'./assets/uv_color.png')
 
     ## root folder
     root_dir = f'./data_built/{args.model_name}'
@@ -171,7 +171,7 @@ if __name__ == '__main__':
         crn_points = np.stack([corners, crn_uv[:-1]], axis=1)
         crn_points = crn_points.reshape(-1,3)
         corner_links = np.stack([np.arange(0, len(crn_points), 2), np.arange(1, len(crn_points), 2)], axis=-1)
-        write_line_file2(f"corner_links_{i}.obj", crn_points, corner_links)
+        # write_line_file2(f"corner_links_{i}.obj", crn_points, corner_links)
 
         ## save parameterized mesh
         uv3d = np.concatenate((uv, np.zeros((uv.shape[0], 1))), axis=1)
@@ -193,7 +193,7 @@ if __name__ == '__main__':
         points = points.reshape(-1,3)
         colors = colors.reshape(-1,3)
         boundary_links = np.stack([np.arange(0, len(points), 2), np.arange(1, len(points), 2)], axis=-1)
-        write_line_file2(f"boundary_links_{i}.obj", points, boundary_links, colors)
+        # write_line_file2(f"boundary_links_{i}.obj", points, boundary_links, colors)
 
     for cl in cell_arc_lengths:
         print(cl)
