@@ -159,7 +159,12 @@ class GUI:
         
         if path_pts_list is not None:
             mesh_pq = trimesh.proximity.ProximityQuery(self.tri_mesh)
-            graph = nx.from_edgelist(face_adjacency_valid)
+            
+            edge_attributes = [
+                (self.tri_mesh.edges_unique[i][0], self.tri_mesh.edges_unique[i][1], {'weight': self.tri_mesh.edges_unique_length[i]})
+                for i in range(len(self.tri_mesh.edges_unique_length))
+            ]
+            graph = nx.from_edgelist(edge_attributes)
             for path_pts in path_pts_list:
 
                 path_pa_indices = []
