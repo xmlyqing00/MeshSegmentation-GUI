@@ -3,6 +3,7 @@ import os
 import numpy as np
 import trimesh
 import json
+import networkx as nx
 import datetime
 from loguru import logger
 from vedo import Plotter, Sphere, Text2D, Mesh, write, Line, utils
@@ -122,26 +123,15 @@ class GUI:
     
     def update_mask(self):
         
-        picked_pt_pid = []
-        for picked_pts in self.all_picked_pts: 
-            picked_pt_pid.append(
-                [self.mesh.closest_point(x['pos'], return_point_id=True) for x in picked_pts]
-            )
+        self.mask = floodfill_label_mesh(
+            self.tri_mesh, 
+            self.boundary_edges,
+        )
 
-        if len(picked_pt_pid) > 0:
+        self.apply_mask()
         
-            self.mask = floodfill_label_mesh(
-                self.tri_mesh, 
-                self.boundary_edges,
-                picked_pt_pid, 
-            )
 
-            self.apply_mask()
-        else:
-            print('No picked points. Nothing changed.')
-
-
-    def apply_mask(self):
+    def apply_mask(self, path_pts_list: list = None):
 
         self.face_patches = -1 + np.zeros(len(self.tri_mesh.faces), dtype=np.int32)
         for i, seg in enumerate(self.mask):
@@ -167,6 +157,25 @@ class GUI:
                 self.boundary_pts.add(fe_adj[i][1])
                 self.boundary_edges.add((fe_adj[i][0], fe_adj[i][1]))
         
+        if path_pts_list is not None:
+            mesh_pq = trimesh.proximity.ProximityQuery(self.tri_mesh)
+            graph = nx.from_edgelist(face_adjacency_valid)
+            for path_pts in path_pts_list:
+
+                path_pa_indices = []
+                d, vid = mesh_pq.vertex(path_pts[0])
+                path_pa_indices.append(vid)
+                for j in range(1, len(path_pts)):
+                    v0 = vid
+                    d, vid = mesh_pq.vertex(path_pts[j])
+                    v1 = vid
+                    if v0 == v1:
+                        continue
+                    else:
+                        p = graph.shortest_path(v0, v1)
+                        self.boundary_edges.add((min(v0, v1), max(v0, v1)))   
+
+
         logger.info(f'Patch number: {len(self.mask)}')
         self.update_mesh_color()
 
@@ -292,41 +301,49 @@ class GUI:
 
         logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices
-        # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
         f = np.array(self.mesh.cells)
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         new_pts = []
+        pts_len = []
         for picked_pts in self.all_picked_pts:
             for i in range(1, len(picked_pts)):
                 v_start = picked_pts[i - 1]['id']
                 v_end = picked_pts[i]['id']
-                # logger.debug(v_start, v_end)
                 path_pts = path_solver.find_geodesic_path(v_start, v_end)
                 # print(f'{v_start} -> {v_end}:', 'Geodesic path', path_pts)
-                new_pts.extend(path_pts[1:-1])
+                new_pts.extend(path_pts)
+                pts_len.append(len(path_pts))
 
         old_mesh = self.mesh
         self.mask_history.append(self.mask)
         self.tri_mesh_history.append(self.tri_mesh)
 
         if len(new_pts) > 0:
-            self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches, self.intersection_merged_threshold)
+            self.tri_mesh, self.mask, path_pts_all = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches, self.intersection_merged_threshold)
             self.mesh = utils.trimesh2vedo(self.tri_mesh)
+
+            pts_offset = 0
+            path_pts_list = []
+            for i in range(len(self.all_picked_pts)):
+                path_pts = path_pts_all[pts_offset:pts_offset + pts_len[i]]
+                path_pts_list.append(path_pts)
+                pts_offset += pts_len[i]
+
+            if self.enable_shadow:
+                self.mesh.add_shadow('z', -self.shadow_dist)
+
+            self.apply_mask(path_pts_list)
+            self.update_mask()
+            self.plt.remove(old_mesh)
+            self.plt.add(self.mesh)
+
+            self.plt.render()
+            self.save()
         else:
             logger.warning('The selected points are all existing vertices. Do nothing on edge splitting.')
         # print('cell colors len in compute', len(self.mesh.cellcolors))
         # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
-        if self.enable_shadow:
-            self.mesh.add_shadow('z', -self.shadow_dist)
-
-        self.apply_mask()
-        self.update_mask()
-        self.plt.remove(old_mesh)
-        self.plt.add(self.mesh)
-
-        self.plt.render()
-        self.save()
 
 
     def clear_last_pt(self):

@@ -211,25 +211,3 @@ if __name__ == "__main__":
 
     plt.close()
     
-    # v = np.array(mesh.vertices)
-    # f = np.array(mesh.cells, dtype=np.int32)
-
-    # ## 
-    # v1, v2, h2, avg = trace_surface_flow(v, f)
-
-    # ## color the mesh with mean curvature
-    # face_h2 = np.mean(h2[f], axis=1)
-    # rgbd = compute_colormap(face_h2)
-    # print(rgbd.shape)
-    # mesh.cellcolors = rgbd
-
-    # ## draw principal flows
-    # arrows_1 = Arrows(v + v1 * avg, v - v1 * avg, s=0.5).c('red')
-    # arrows_2 = Arrows(v + v2 * avg, v - v2 * avg, s=0.5).c('green')
-
-    # plt = Plotter(axes=8, bg='white', size=(1200, 800))
-    # plt.add(mesh)
-    # plt.add(arrows_1)
-    # plt.add(arrows_2)
-    # plt.show()
-    # plt.close()

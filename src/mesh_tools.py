@@ -4,62 +4,71 @@ import networkx as nx
 from loguru import logger
 
 
-"""
-vert_edges: [N, 2, 3]
-queries: [M, 3]
-"""
-def find_intersection_pairs(queries, edge_verts, intersection_merged_threshold):
-    v = queries[:, None, :] - edge_verts[None, :, 0, :] ## [M, N, 3]
+def find_intersection_pairs(path_pts, edge_verts, intersection_merged_threshold):
+
+    v = path_pts[:, None, :] - edge_verts[None, :, 0, :] ## [M, N, 3]
     v_norm = np.linalg.norm(v, axis=-1) 
     ev = v / v_norm[...,None] ## [M, N, 3]
-    # x = np.nonzero(v_norm < 1e-5)
-    # print('len != 0', x)
-    # print(np.nonzero(v_norm==0))
 
     b = edge_verts[:, 1, :] - edge_verts[:, 0, :] ## [N, 3]
     b_norm = np.linalg.norm(b, axis=-1) 
     eb = b/b_norm[...,None] ## [N, 3]
     
     cos_angle = (ev*eb[None,]).sum(axis=-1, keepdims=False)
-    qids, eids = np.nonzero(cos_angle > 0.9999)
-
-    intersections = []
-    unique_qids, counts = np.unique(qids, return_counts=True)
 
     eid_set = set()
     queries_for_insert = []
     intersection_ignore_cnt = 0
-    for qid, cnt in zip(unique_qids, counts):
+    path_pts_new = []
+    intersections = []
+
+    for qid in range(len(path_pts)):
+    # qids, eids = np.nonzero(cos_angle > 0.99)
+
+    # unique_qids, _ = np.unique(qids, return_counts=True)
+    # assert len(unique_qids) == len(path_pts)
+
+    # for qid in unique_qids:
+        eps = 0.99
         
-        eid = eids[qids == qid]
+        eid = np.nonzero(cos_angle[qid] > eps)[0]
+        if len(eid) == 0:
+            logger.warning(f'No intersection found for query {qid}')
+            eid = np.array([cos_angle[qid].argmax()])
+
         ratio = v_norm[qid, eid] / b_norm[eid]
 
         min_eid = ratio.argmin()
         intersection_eid = eid[min_eid]
-        if ratio[min_eid] < 1:
+        ratio_min = ratio[min_eid]
 
-            if intersection_eid in eid_set:
-                continue
+        if ratio_min < 1:  # path is on vertex
 
             # Don't insert if the intersection is close to the end of the edge
-            if ratio[min_eid] < intersection_merged_threshold or ratio[min_eid] > 1 - intersection_merged_threshold:
+            if ratio_min < intersection_merged_threshold or ratio_min > 1 - intersection_merged_threshold:
                 intersection_ignore_cnt += 1
-                continue
+                if ratio_min < intersection_merged_threshold:
+                    path_pts_new.append(edge_verts[intersection_eid, 0, :])
+                else:
+                    path_pts_new.append(edge_verts[intersection_eid, 1, :])
+            else:
+                
+                path_pts_new.append(path_pts[qid])
 
-            eid_set.add(intersection_eid)
-            intersections.append((qid, intersection_eid))
-            queries_for_insert.append(queries[qid])
+                if intersection_eid not in eid_set:
+                    eid_set.add(intersection_eid)
+                    intersections.append((qid, intersection_eid))
+                    queries_for_insert.append(path_pts[qid])
+        else:
+            path_pts_new.append(path_pts[qid])
+        
+
 
     logger.debug(f'Intersection {len(eid_set)}, ignore count: {intersection_ignore_cnt}')
 
-    return queries_for_insert, intersections
+    return queries_for_insert, intersections, path_pts_new
 
 
-"""
-inserted_points: [M, 3]
-edges: a list of edges (vid0, vid1) in mesh
-intersection_pairs: a list of pairs, pair:(insert pt id, edge id)
-"""
 def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_pairs):
 
     num_verts = len(mesh.vertices)
@@ -141,39 +150,37 @@ def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_
 
 
 def split_mesh(mesh, path_pts, face_patches, intersection_merged_threshold=0.15):
-    ## add some noises to the path_pts, so we can quickly find the faces that the path intersects
-    # path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
-    path_pths_without_ends = path_pts[:, :] 
+    
     pq_mesh = trimesh.proximity.ProximityQuery(mesh)
-    queries = np.array(path_pths_without_ends)
+    path_pts = np.array(path_pts)
 
-    _, _, fids = pq_mesh.on_surface(queries)
+    _, _, fids = pq_mesh.on_surface(path_pts)
+    # vts = mesh.vertices[mesh.faces[fids]]
+
     fids = np.unique(fids)
-    # vids = np.unique((mesh.faces[fids]).reshape(-1))
-    # face_verts = mesh.vertices[vids]
 
-    ##
-    edges = [
-        mesh.faces[fids][:,0], 
-        mesh.faces[fids][:,1], 
-        mesh.faces[fids][:,1], 
-        mesh.faces[fids][:,2], 
-        mesh.faces[fids][:,2], 
-        mesh.faces[fids][:,0]
-    ]
-    edges = np.stack(edges, axis=-1)
-    edges = edges.reshape(-1, 2)
-    edges_sorted = np.sort(edges, axis=1)
-    unique, _ = trimesh.grouping.unique_rows(edges_sorted)
-    edges_unique = edges_sorted[unique] 
-    # write_obj_file(os.path.join(save_dir, f"selected_faces.obj"), face_verts)
+    # edges = [
+    #     mesh.faces[fids][:,0], 
+    #     mesh.faces[fids][:,1], 
+    #     mesh.faces[fids][:,1], 
+    #     mesh.faces[fids][:,2], 
+    #     mesh.faces[fids][:,2], 
+    #     mesh.faces[fids][:,0]
+    # ]
+    # edges = np.stack(edges, axis=-1)
+    # edges = edges.reshape(-1, 2)
+    # edges_sorted = np.sort(edges, axis=1)
+    # unique, _ = trimesh.grouping.unique_rows(edges_sorted)
+    # edges_unique = edges_sorted[unique] 
+
+    edges = mesh.edges_unique[mesh.faces_unique_edges[fids]].reshape(-1, 2)
+    unique, _ = trimesh.grouping.unique_rows(edges)
+    edges_unique = edges[unique]
+
     edge_verts = mesh.vertices[edges_unique]
-    queries_for_insert, intersection_pairs = find_intersection_pairs(path_pths_without_ends, edge_verts, intersection_merged_threshold)
 
-    """
-    intersection_pairs: a list of pairs
-    pair: (qid, eid)
-    """
+    queries_for_insert, intersection_pairs, path_pts_new = find_intersection_pairs(path_pts, edge_verts, intersection_merged_threshold)
+
     if len(intersection_pairs) == 0:
         face_patches_out = face_patches
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces)
@@ -190,38 +197,18 @@ def split_mesh(mesh, path_pts, face_patches, intersection_merged_threshold=0.15)
         mask.append(face_ids)
         group_id += 1
 
-    return mesh, mask
+    return mesh, mask, path_pts_new
 
 
 def floodfill_label_mesh(
     tri_mesh: trimesh.Trimesh, 
     boundary_edges: set,
-    all_picked_pt_pid: list, 
 ):
     
     face_adjacency = tri_mesh.face_adjacency
     face_adjacency_edges = tri_mesh.face_adjacency_edges
 
     assert len(face_adjacency) == len(face_adjacency_edges)
-
-    edge_attributes = [
-        (tri_mesh.edges_unique[i][0], tri_mesh.edges_unique[i][1], {'weight': tri_mesh.edges_unique_length[i]})
-        for i in range(len(tri_mesh.edges_unique_length))
-    ]
-    graph = nx.from_edgelist(edge_attributes)
-    
-    for picked_pt_pid in all_picked_pt_pid:
-        for i in range(1, len(picked_pt_pid)):
-            path_pts = nx.shortest_path(
-                graph, 
-                picked_pt_pid[i - 1], 
-                picked_pt_pid[i], 
-                weight='weight'
-            )
-            for i in range(1, len(path_pts)):
-                v0 = path_pts[i - 1]
-                v1 = path_pts[i]
-                boundary_edges.add((min(v0, v1), max(v0, v1)))   
 
     face_adjacency_edges = np.sort(face_adjacency_edges, axis=1)
     face_adjacency_valid = []

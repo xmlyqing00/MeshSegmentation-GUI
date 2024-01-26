@@ -671,10 +671,12 @@ class MeshSegmentator():
                 break
     
     def split_mesh_with_boundaries(self):
-        for cut in self.boundary_list:
-            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, 0.15)
+        for i in range(len(self.boundary_list)):
+            new_mesh, new_mask, path_pts = split_mesh(self.mesh, self.boundary_list[i].points, self.mesh.faces, 0.15)
             self.mesh = new_mesh
             self.mask = new_mask
+            self.boundary_list[i].point = Boundary(path_pts)
+            # need to set up the indices too but not here.
 
         self.mesh_path_solver = GeoPathSolverWrapper(self.mesh)
         self.pq_mesh = trimesh.proximity.ProximityQuery(self.mesh)

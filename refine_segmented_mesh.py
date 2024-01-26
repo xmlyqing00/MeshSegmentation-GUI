@@ -56,7 +56,7 @@ def apply_mask(segmented_mesh: trimesh.Trimesh, mask: list):
     # logger.info(f'Edge number of open boundary: {unique_edges.shape[0]}')
 
 
-def edge_flip(segmented_mesh: trimesh.Trimesh, boundary_pts: set):
+def edge_flip(segmented_mesh: trimesh.Trimesh, boundary_pts: set, edge_flip_threshold: float=1.1):
     
     f_adj_list = segmented_mesh.face_adjacency
     fe_adj_list = np.sort(segmented_mesh.face_adjacency_edges, axis=1)
@@ -93,7 +93,7 @@ def edge_flip(segmented_mesh: trimesh.Trimesh, boundary_pts: set):
             neighbor_pts = neighbor_pts / np.linalg.norm(neighbor_pts, axis=1)[:, None]
             angle_off_edge_sum += np.arccos(neighbor_pts[0].dot(neighbor_pts[1]))
 
-        if angle_on_edge_sum * 1.5 < angle_off_edge_sum:
+        if angle_on_edge_sum * edge_flip_threshold < angle_off_edge_sum:
             flip_edge_list.append({
                 'f_adj': f_adj,
                 'angle_ratio': angle_on_edge_sum / angle_off_edge_sum,
@@ -134,7 +134,7 @@ def edge_flip(segmented_mesh: trimesh.Trimesh, boundary_pts: set):
 
 def refinement(
         segmented_mesh: trimesh.Trimesh, boundary_pts: set, 
-        iters: int = 0, edge_flip_flag: bool = False, laplician_flag=False,
+        iters: int = 0, edge_flip_flag: bool = False, laplacian_flag=False,
     ):
 
     viz_list = []
@@ -146,7 +146,7 @@ def refinement(
             segmented_mesh, edge_flip_viz = edge_flip(segmented_mesh, boundary_pts)
             viz_list.extend(edge_flip_viz)
 
-        if laplician_flag:
+        if laplacian_flag:
             one_ring_pts = []
             for boundary_pt in tqdm(boundary_pts, desc='Check one ring points'):
 
@@ -159,7 +159,7 @@ def refinement(
             logger.info(f'One ring points number: {len(one_ring_pts)}')
             
             shuffle(one_ring_pts)
-            for pt in tqdm(one_ring_pts, desc='Laplician smooth'):
+            for pt in tqdm(one_ring_pts, desc='laplacian smooth'):
 
                 neighbor_pts = segmented_mesh.vertex_neighbors[pt]
                 neighbor_verts = segmented_mesh.vertices[neighbor_pts]
@@ -201,7 +201,7 @@ if __name__ == '__main__':
     if args.edge_flip:
         export_path = export_path.replace('.ply', '_edge_flip.ply')
     if args.laplacian:
-        export_path = export_path.replace('.ply', '_laplician.ply')
+        export_path = export_path.replace('.ply', '_laplacian.ply')
     smoothed_mesh.export(str(export_path))
     logger.info(f'Smoothed mesh exported to {export_path}')
 
