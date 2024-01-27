@@ -167,9 +167,9 @@ class GUI:
             graph = nx.from_edgelist(edge_attributes)
             for path_pts in path_pts_list:
 
-                path_pa_indices = []
+                # path_pa_indices = []
                 d, vid = mesh_pq.vertex(path_pts[0])
-                path_pa_indices.append(vid)
+                # path_pa_indices.append(vid)
                 for j in range(1, len(path_pts)):
                     v0 = vid
                     d, vid = mesh_pq.vertex(path_pts[j])
@@ -177,9 +177,15 @@ class GUI:
                     if v0 == v1:
                         continue
                     else:
-                        p = graph.shortest_path(v0, v1)
-                        self.boundary_edges.add((min(v0, v1), max(v0, v1)))   
+                        shortest_path_pts = nx.shortest_path(
+                            graph, v0, v1, weight='weight'
+                        )
 
+                        for i in range(1, len(shortest_path_pts)):
+                            v0 = shortest_path_pts[i - 1]
+                            v1 = shortest_path_pts[i]
+                            print()
+                            self.boundary_edges.add((min(v0, v1), max(v0, v1)))   
 
         logger.info(f'Patch number: {len(self.mask)}')
         self.update_mesh_color()
@@ -241,6 +247,7 @@ class GUI:
             logger.info(f'The nearest existing pt is too far. Distance: {dist[idx]}')
             return mouse_pt
 
+
     def update_mesh_color(self):
 
         for group_idx, group in enumerate(self.mask):
@@ -289,7 +296,11 @@ class GUI:
         if self.enable_shadow:
             self.mesh.add_shadow('z', -self.shadow_dist)
 
-        self.apply_mask()
+        path_pts_list = []
+        for picked_pts in self.all_picked_pts:
+            path_pts_list.append([pt['pos'] for pt in picked_pts])
+
+        self.apply_mask(path_pts_list)
         self.update_mask()
         self.plt.remove(old_mesh)
         self.plt.add(self.mesh)

@@ -61,8 +61,6 @@ def find_intersection_pairs(path_pts, edge_verts, intersection_merged_threshold)
                     queries_for_insert.append(path_pts[qid])
         else:
             path_pts_new.append(path_pts[qid])
-        
-
 
     logger.debug(f'Intersection {len(eid_set)}, ignore count: {intersection_ignore_cnt}')
 
@@ -213,7 +211,10 @@ def floodfill_label_mesh(
     face_adjacency_edges = np.sort(face_adjacency_edges, axis=1)
     face_adjacency_valid = []
     for i in range(len(face_adjacency_edges)):
-        if tuple(face_adjacency_edges[i].tolist()) not in boundary_edges:
+        x = face_adjacency_edges[i].tolist()
+        a = min(x[0], x[1])
+        b = max(x[0], x[1])
+        if tuple(a, b) not in boundary_edges:
             face_adjacency_valid.append(face_adjacency[i])
 
     graph = nx.from_edgelist(face_adjacency_valid)
