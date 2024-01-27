@@ -19,6 +19,7 @@ class GUI:
             tri_mesh: trimesh.Trimesh, 
             output_dir: str, 
             plt: Plotter, 
+            intersection_merged_threshold: float,
             mask: list = None,
             close_point_merging: bool = True,
         ) -> None:
@@ -26,6 +27,7 @@ class GUI:
         self.loop_flag = True
         self.merge_mode = False
         self.close_point_merging = close_point_merging
+        self.intersection_merged_threshold = intersection_merged_threshold
 
         self.plt = plt
         self.output_dir = output_dir
@@ -291,7 +293,7 @@ class GUI:
         logger.success(f'Compute the GEODESIC path. Number of paths of picked pts: {len(self.all_picked_pts)}')
         v = self.mesh.vertices
         # print('Compute geodesic path.', f'Number of paths of picked pts: {len(self.all_picked_pts)}')
-        f = np.array(self.mesh.faces())
+        f = np.array(self.mesh.cells)
         path_solver = EdgeFlipGeodesicSolver(v, f) # shares precomputation for repeated solves
 
         new_pts = []
@@ -308,8 +310,11 @@ class GUI:
         self.mask_history.append(self.mask)
         self.tri_mesh_history.append(self.tri_mesh)
 
-        self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches)
-        self.mesh = utils.trimesh2vedo(self.tri_mesh)
+        if len(new_pts) > 0:
+            self.tri_mesh, self.mask = split_mesh(self.tri_mesh, np.array(new_pts), self.face_patches, self.intersection_merged_threshold)
+            self.mesh = utils.trimesh2vedo(self.tri_mesh)
+        else:
+            logger.warning('The selected points are all existing vertices. Do nothing on edge splitting.')
         # print('cell colors len in compute', len(self.mesh.cellcolors))
         # self.mesh = Mesh([self.tri_mesh.vertices.tolist(), self.tri_mesh.faces.tolist()])
         if self.enable_shadow:
@@ -393,6 +398,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
     parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
+    parser.add_argument('--intersection-merged-threshold', type=float, default=0.15, help='Threshold for merging intersections to exisiting vertices.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
     args = parser.parse_args()    
     logger.info(f'Arguments: {args}')
@@ -444,7 +450,7 @@ if __name__ == '__main__':
     else:
         close_point_merging = True
 
-    gui = GUI(tri_mesh, output_dir, plt, mask, close_point_merging)  
+    gui = GUI(tri_mesh, output_dir, plt, args.intersection_merged_threshold, mask, close_point_merging)  
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)

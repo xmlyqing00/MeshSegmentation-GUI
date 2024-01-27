@@ -1,14 +1,14 @@
 import numpy as np
 import trimesh
-from vedo import Mesh
 import networkx as nx
+from loguru import logger
 
 
 """
 vert_edges: [N, 2, 3]
 queries: [M, 3]
 """
-def find_intersection_pairs(queries, edge_verts):
+def find_intersection_pairs(queries, edge_verts, intersection_merged_threshold):
     v = queries[:, None, :] - edge_verts[None, :, 0, :] ## [M, N, 3]
     v_norm = np.linalg.norm(v, axis=-1) 
     ev = v / v_norm[...,None] ## [M, N, 3]
@@ -21,13 +21,14 @@ def find_intersection_pairs(queries, edge_verts):
     eb = b/b_norm[...,None] ## [N, 3]
     
     cos_angle = (ev*eb[None,]).sum(axis=-1, keepdims=False)
-    qids, eids = np.nonzero(cos_angle>0.9999)
+    qids, eids = np.nonzero(cos_angle > 0.9999)
 
     intersections = []
     unique_qids, counts = np.unique(qids, return_counts=True)
 
     eid_set = set()
     queries_for_insert = []
+    intersection_ignore_cnt = 0
     for qid, cnt in zip(unique_qids, counts):
         
         eid = eids[qids == qid]
@@ -40,9 +41,16 @@ def find_intersection_pairs(queries, edge_verts):
             if intersection_eid in eid_set:
                 continue
 
+            # Don't insert if the intersection is close to the end of the edge
+            if ratio[min_eid] < intersection_merged_threshold or ratio[min_eid] > 1 - intersection_merged_threshold:
+                intersection_ignore_cnt += 1
+                continue
+
             eid_set.add(intersection_eid)
             intersections.append((qid, intersection_eid))
             queries_for_insert.append(queries[qid])
+
+    logger.debug(f'Intersection {len(eid_set)}, ignore count: {intersection_ignore_cnt}')
 
     return queries_for_insert, intersections
 
@@ -129,11 +137,10 @@ def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_
     faces = np.concatenate([mesh.faces[kept_face_ids>0], faces_new], axis=0)
     face_patches_out = np.concatenate([face_patches[kept_face_ids>0], face_patches_new], axis=0)
     out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False, maintain_order=True)
-    # out_mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     return out_mesh, face_patches_out
 
 
-def split_mesh(mesh, path_pts, face_patches):
+def split_mesh(mesh, path_pts, face_patches, intersection_merged_threshold=0.15):
     ## add some noises to the path_pts, so we can quickly find the faces that the path intersects
     # path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
     path_pths_without_ends = path_pts[:, :] 
@@ -142,7 +149,7 @@ def split_mesh(mesh, path_pts, face_patches):
 
     _, _, fids = pq_mesh.on_surface(queries)
     fids = np.unique(fids)
-    vids = np.unique((mesh.faces[fids]).reshape(-1))
+    # vids = np.unique((mesh.faces[fids]).reshape(-1))
     # face_verts = mesh.vertices[vids]
 
     ##
@@ -161,16 +168,18 @@ def split_mesh(mesh, path_pts, face_patches):
     edges_unique = edges_sorted[unique] 
     # write_obj_file(os.path.join(save_dir, f"selected_faces.obj"), face_verts)
     edge_verts = mesh.vertices[edges_unique]
-    queries_for_insert, intersection_pairs = find_intersection_pairs(path_pths_without_ends, edge_verts)
+    queries_for_insert, intersection_pairs = find_intersection_pairs(path_pths_without_ends, edge_verts, intersection_merged_threshold)
 
     """
     intersection_pairs: a list of pairs
     pair: (qid, eid)
     """
-    if len(intersection_pairs) > 0:
-        mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
-    else:
+    if len(intersection_pairs) == 0:
         face_patches_out = face_patches
+        mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces)
+    else:
+        mesh, face_patches_out = split_mesh_by_path(mesh, face_patches, queries_for_insert, edges_unique, intersection_pairs)
+
     group_id = 0
     mask = []
     while True:
@@ -179,7 +188,6 @@ def split_mesh(mesh, path_pts, face_patches):
         if len(face_ids) == 0:
             break
         mask.append(face_ids)
-        # print('seg output', group_id, mask)
         group_id += 1
 
     return mesh, mask
@@ -225,6 +233,7 @@ def floodfill_label_mesh(
     groups = [list(x) for x in nx.connected_components(graph)]
 
     return groups
+
 
 def simple_floodfill_label_mesh(
     mesh: trimesh.Trimesh, 

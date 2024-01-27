@@ -8,6 +8,8 @@ output/
 data/
 output*
 
+tmp/
+
 *.obj
 *.ply
 
