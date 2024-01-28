@@ -398,7 +398,7 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=str, default='data/manohand_0.obj', help='Input mesh path.')
     parser.add_argument('--mask', type=str, default=None, help='Input mask path.')
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
-    parser.add_argument('--intersection-merged-threshold', type=float, default=0.15, help='Threshold for merging intersections to exisiting vertices.')
+    parser.add_argument('--intersection-merged-threshold', type=float, default=0.01, help='Threshold for merging intersections to exisiting vertices.')
     parser.add_argument('--no-close-point-merging', action='store_true', help='Disable the close point merging.')
     args = parser.parse_args()    
     logger.info(f'Arguments: {args}')

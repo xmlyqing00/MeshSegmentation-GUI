@@ -98,7 +98,6 @@ def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_
         ## find faces that will get inserted nodes
         removed_faces = []
         inserted_faces = []
-        inserted_faces = []
         inserted = num_verts + i
         face_patches_old = []
 
