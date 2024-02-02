@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 import numpy as np
 import igl
-from meshplot import plot, subplot, interact
+# from meshplot import plot, subplot, interact
 from mesh_data_structure.utils import GeoPathSolverWrapper, get_open_boundary
 
 

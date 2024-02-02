@@ -85,7 +85,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     ## read data
-    meshfile = f'./output/{args.model_name}/segmented_mesh.ply'
+    meshfile = f'./output/{args.model_name}/segmented_mesh_final.ply'
     maskfile = f'./output/{args.model_name}/mask.json'
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)

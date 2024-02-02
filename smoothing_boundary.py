@@ -243,7 +243,76 @@ def edge_flip2(mesh:trimesh.Trimesh, boundary_vertex_ids:list):
     mesh.faces[face_list] = new_faces
     return mesh
 
+def edge_flip3(segmented_mesh: trimesh.Trimesh, boundary_pts: list):
+    f_adj_list = segmented_mesh.face_adjacency
+    fe_adj_list = np.sort(segmented_mesh.face_adjacency_edges, axis=1)
 
+    flip_edge_list = []
+    num_fe = len(fe_adj_list)
+    for i in tqdm(range(num_fe), desc='Edge flip'):
+        both_on_boundary = True
+        f_adj = f_adj_list[i]
+        fe_adj = fe_adj_list[i]
+        for fe_adj_pt in fe_adj:
+            if fe_adj_pt not in boundary_pts:
+                both_on_boundary = False
+        
+        ## skip edge flip if both endpoints are on the boundary
+        if both_on_boundary:
+            continue
+        
+        pt_on_edge = fe_adj
+        pt_all = np.unique(segmented_mesh.faces[f_adj].flatten())
+        pt_off_edge = np.setdiff1d(pt_all, pt_on_edge, assume_unique=True)
+
+        angle_on_edge_sum = 0
+        for pt_id in pt_on_edge:
+            pt = segmented_mesh.vertices[pt_id]
+            neighbor_pts = segmented_mesh.vertices[pt_off_edge]
+            neighbor_pts = neighbor_pts - pt
+            neighbor_pts = neighbor_pts / np.linalg.norm(neighbor_pts, axis=1)[:, None]
+            angle_on_edge_sum += np.arccos(neighbor_pts[0].dot(neighbor_pts[1]))
+
+        angle_off_edge_sum = 0
+        for pt_id in pt_off_edge:
+            pt = segmented_mesh.vertices[pt_id]
+            neighbor_pts = segmented_mesh.vertices[pt_on_edge]
+            neighbor_pts = neighbor_pts - pt
+            neighbor_pts = neighbor_pts / np.linalg.norm(neighbor_pts, axis=1)[:, None]
+            angle_off_edge_sum += np.arccos(neighbor_pts[0].dot(neighbor_pts[1]))
+
+        if angle_on_edge_sum * 1.5 < angle_off_edge_sum:
+            flip_edge_list.append({
+                'f_adj': f_adj,
+                'angle_ratio': angle_on_edge_sum / angle_off_edge_sum,
+                'pt_all': pt_all,
+                'pt_on_edge': pt_on_edge,
+            })
+    
+    logger.info(f'Flip edge number: {len(flip_edge_list)}')
+    
+    flip_edge_list = sorted(flip_edge_list, key=lambda x: x['angle_ratio'], reverse=True)
+    
+    faces = np.asarray(segmented_mesh.faces)
+    face_mask = np.ones(len(faces), dtype=bool)
+    for flip_edge in tqdm(flip_edge_list, desc='Edge flip'):
+        fid0 = flip_edge['f_adj'][0]
+        fid1 = flip_edge['f_adj'][1]
+        if face_mask[fid0] and face_mask[fid1]:
+            face_mask[fid0] = False
+            face_mask[fid1] = False
+
+            pt_rest = np.setdiff1d(flip_edge['pt_all'], faces[fid0], assume_unique=True)
+            m = faces[fid0] == flip_edge['pt_on_edge'][0]
+            faces[fid0][m] = pt_rest[0]
+
+            pt_rest = np.setdiff1d(flip_edge['pt_all'], faces[fid1], assume_unique=True)
+            m = faces[fid1] == flip_edge['pt_on_edge'][1]
+            faces[fid1][m] = pt_rest[0]
+
+    segmented_mesh.faces = faces
+
+    return segmented_mesh
 
 def edge_flip(segmented_mesh: trimesh.Trimesh, boundary_pts: list):
     
@@ -363,6 +432,11 @@ def refinement(
             t1 = time.time()
             logger.info(f'laplacian_smooth_mesh time: {t1 - t0}')
             segmented_mesh.export(f'smoothed_mesh_{iter_idx}.obj')
+
+    t0 = time.time()
+    segmented_mesh = edge_flip3(segmented_mesh, boundary_vertex_ids)
+    t1 = time.time()
+    logger.info(f'edge_flip3 time: {t1 - t0}')
 
     return segmented_mesh, viz_list
 
@@ -502,7 +576,7 @@ if __name__ == '__main__':
         segmented_mesh, boundary_curves, 
         args.iters, args.boundary_resample, args.edge_flip, args.laplacian
     )
-
+    segmented_mesh.export(f'segmented_mesh_final.ply')
     # export_path = str(outdir / f'segmented_mesh_smoothed_{args.iters}.ply')
     # if args.edge_flip:
     #     export_path = export_path.replace('.ply', '_edge_flip.ply')
