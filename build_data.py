@@ -85,7 +85,9 @@ if __name__ == '__main__':
     args = parse_args()
 
     ## read data
-    meshfile = f'./output/{args.model_name}/segmented_mesh_final.ply'
+    meshfile = f'./output/{args.model_name}/segmented_mesh.obj'
+    # meshfile = f'./output/{args.model_name}/smoothed_mesh_19.obj'
+    # meshfile = f'./output/{args.model_name}/segmented_mesh_final.ply'
     maskfile = f'./output/{args.model_name}/mask.json'
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
@@ -103,20 +105,22 @@ if __name__ == '__main__':
     savefolder = f'{root_dir}/data'
     if not os.path.exists(savefolder):
         os.makedirs(savefolder)
+
     ## build complex from the base mesh and its patches (dict)
     complex_builder = ComplexBuilder(mesh, mask)
     graph = complex_builder.build_complex_recursive()
     # complex_builder.save_complex(graph, root_dir)
+    
     # print(graph)
     write_json(graph, os.path.join(savefolder, "topology_graph.json"))
     shutil.copyfile(maskfile, os.path.join(savefolder, 'mask.json'))
+
     ## cell arc lengths
     cell_arc_lengths = get_boundary_length_from_mask(mesh, mask, graph)
     # for cl in cell_arc_lengths:
     #     print(cl)
     # write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
     
-
     ## save normalized mesh
     savemeshfolder = f'{savefolder}/single'
     if not os.path.exists(savemeshfolder):
