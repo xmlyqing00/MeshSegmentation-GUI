@@ -72,10 +72,14 @@ def write_line_file2(save_to, V, L, C=None, vid_start=1):
 
 def trace_path_by_samples(mesh, uv, corner_id, sample_num=20):
 
+    if uv[corner_id, 0] > 0:
+        uv[:, 0] = 1 - uv[:, 0]
+
     point_cur = {
         'x': mesh.vertices[corner_id],
         'u': uv[corner_id, 0]
     }
+
     cut_path = [point_cur['x']]
     cut_path_info = [point_cur]
 
@@ -131,7 +135,7 @@ def trace_path_by_samples(mesh, uv, corner_id, sample_num=20):
     return np.array(cut_path), cut_path_info
 
 
-def preprocess(mesh, texture_img):
+def preprocess(mesh, texture_img=None):
     
     mesh_size = np.array([
         mesh.vertices[:, 0].max() - mesh.vertices[:, 0].min(),
@@ -142,12 +146,13 @@ def preprocess(mesh, texture_img):
     
     uv, boundary_list = compute_harmonic_scalar_field(mesh)
     uv[:, 1] = 0
-    uv_visuals = trimesh.visual.texture.TextureVisuals(
-        uv=uv, 
-        image=texture_img
-    )
-    mesh.visual = uv_visuals
-    mesh.export(str(out_dir / exp_name.name))
+    if texture_img:
+        uv_visuals = trimesh.visual.texture.TextureVisuals(
+            uv=uv, 
+            image=texture_img
+        )
+        mesh.visual = uv_visuals
+        mesh.export(str(out_dir / exp_name.name))
     
     return uv, vis_size, boundary_list
 
@@ -191,11 +196,11 @@ def main_cut_one_path(mesh, out_dir, texture_img, exp_name):
     corner_ids = [vids[a0], vids[a1]]
 
     cut_path, cut_path_info = trace_path_by_samples(mesh, uv, corner_ids[0], sample_num=20)
-    cut_path_u, cut_path_info_u = trace_path_by_samples(mesh, uv, corner_ids[1], sample_num=20)
+    # cut_path_u, cut_path_info_u = trace_path_by_samples(mesh, uv, corner_ids[1], sample_num=20)
     cut_path2 = [mesh.vertices[vids[a1]]]
     # cut_path2 = []
 
-    path2_idx = 1
+    # path2_idx = 1
     for i in range(1, len(cut_path)):
         
         if i == 0:
@@ -278,7 +283,7 @@ def main_cut_one_path(mesh, out_dir, texture_img, exp_name):
         opposite_point = round_center - cut_path[i]
         opposite_dir = opposite_point / np.linalg.norm(opposite_point)
         
-        round_path_seg = None
+        # round_path_seg = None
         p_cos_list = []
         for j in range(len(round_path)):
             p = round_path[j]
@@ -305,13 +310,7 @@ def main_cut_one_path(mesh, out_dir, texture_img, exp_name):
                 if p_cos_max < p_cos:
                     p_cos_max = p_cos
                     mid_point = p
-        # round_piecewise_lens = np.array([np.linalg.norm(round_path[i+1] - round_path[i]) for i in range(len(round_path)-1)])
-        # round_piecewise_lens_cumsum = np.cumsum(round_piecewise_lens)
-        # half_len = round_piecewise_lens_cumsum[-1] / 2
-        # mid_point_idx = bisect.bisect_left(round_piecewise_lens_cumsum, half_len)
-        # rest_len = round_piecewise_lens_cumsum[mid_point_idx] - half_len
-        # r = rest_len / round_piecewise_lens[mid_point_idx]
-        # mid_point = round_path[mid_point_idx] * (1-r) + round_path[mid_point_idx+1] * r
+      
         cut_path2.append(mid_point)
 
         round_spheres = create_spheres(round_path, radius=vis_size, color=(0,200,0))

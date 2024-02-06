@@ -107,7 +107,7 @@ def parameterize_mesh(v, f, crn_ids):
     return uv, bnd_uv, endpoints, list_boundary_length, bnd_list
 
 
-def compute_harmonic_scalar_field(mesh, boundary_list=None):
+def compute_harmonic_scalar_field(mesh):
     
     tmp_boundary_list = get_open_boundary(mesh)
     # print('boundary', boundary_list)

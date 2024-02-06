@@ -17,6 +17,7 @@ from mesh_data_structure.utils import trace_boundary_edges, close_holes, compute
 from mesh_data_structure.components import PatchTopo, Boundary, Cut
 from igl_parameterization import compute_harmonic_scalar_field
 from src.mesh_tools import split_mesh, split_mesh_by_path, floodfill_label_mesh
+from cut_cylinder import preprocess, trace_path_by_samples
 
 
 class MeshSegmentator():
@@ -216,6 +217,7 @@ class MeshSegmentator():
     
 
     def cut_annulus_by_two_furthest_pts(self, mask_id):
+
         m = np.array(self.mask[mask_id], dtype=np.int32)
         patch_mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
         path_solver = GeoPathSolverWrapper(patch_mesh)
@@ -314,7 +316,13 @@ class MeshSegmentator():
         
         return throughhole_paths
     
-    
+
+    def find_closest_point_on_boundary(self, p, boundary_pts):
+        d = np.linalg.norm(p - boundary_pts, axis=1)
+        min_idx = np.argmin(d)
+        return min_idx, d[min_idx]
+        
+
     def cut_annulus_by_one_furthest_pts_and_scalar_field(self, mask_id):
         bids = self.patch_topo_list[mask_id].boundary_ids
         assert len(bids) == 2, "Num of boundary_loops in annulus should be 2"
@@ -345,98 +353,178 @@ class MeshSegmentator():
             logger.warning(f"Complement boundary {bidx_c} in mask {mask_id} has fixed points. Propogate cuts from the fixed points.")
         
         m = np.array(self.mask[mask_id])
-        mesh = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
-        uv, boundary_list_local = compute_harmonic_scalar_field(mesh)
-        uv[:, 1] = 0
-        uv_visuals = trimesh.visual.texture.TextureVisuals(
-            uv=uv, 
-            image=self.texture_img
-        )
-        mesh.visual = uv_visuals
-        mesh.export(f'tmp/{mask_id}_scalar_field.obj')
-        local_pq_mesh = trimesh.proximity.ProximityQuery(mesh)
-
-        # localize a0, a1
-        d, a0_local = local_pq_mesh.vertex(self.mesh.vertices[a0])
-        d, a1_local = local_pq_mesh.vertex(self.mesh.vertices[a1])
-
-        if abs(uv[a0_local, 0] - 1) < 1e-8:
-            uv = 1 - uv
+        mesh_local = trimesh.Trimesh(self.mesh.vertices, self.mesh.faces[m,:])
         
-        sample_num = 20
-        corner_ids = [a0_local, a1_local]
-        vid_c = []
-        throughhole_paths = []
-        for cid, corner_id in enumerate(corner_ids):
+        uv, vis_size, boundary_list_local = preprocess(mesh_local, None)
+        
+        # pair_dist = cdist(v, v)
+        # a0, a1 = np.unravel_index(np.argmax(pair_dist), pair_dist.shape)
 
+        corner_ids = [a0, a1]
+        local_vids = []
+        local_bidx_logs = []
+        for ai in corner_ids:
+            bidx_local = 0
+            while bidx_local < 2:
+                vids = np.array(boundary_list_local[bidx_local])
+                boundary_pts_local = mesh_local.vertices[vids]
+                closest_id, closest_d = self.find_closest_point_on_boundary (self.mesh.vertices[ai], boundary_pts_local)
+                if closest_d > 1e-7:
+                    bidx_local = 1
+                    uv[:, 0] = 1 - uv[:, 0]
+                else:
+                    local_vids.append(vids[closest_id])
+                    local_bidx_logs.append(bidx_local)
+                    break
+            if bidx_local == 2:
+                logger.error(f"Failed to find the closest point on the local mesh for vertex {ai}.")
+                return None
+        
+        if local_bidx_logs[0] != local_bidx_logs[1]:
+            logger.error(f"Failed to find the closest point on the same local boundary for vertex {corner_ids}.")
+            return None
+            
+        cut_path, cut_path_info = trace_path_by_samples(mesh_local, uv, local_vids[0], sample_num=20)
+        # cut_path_u, cut_path_info_u = trace_path_by_samples(mesh, uv, corner_ids[1], sample_num=20)
+        cut_path2 = [self.mesh.vertices[a1]]
+        
+        for i in range(1, len(cut_path)):
+    
+            eid = cut_path_info[i]['eid']
+            e = mesh_local.edges_unique[eid]
+            faces = mesh_local.vertex_faces[e].flatten()
+
+            round_path = [cut_path[i]]
+            trace_u = cut_path_info[i]['u']
             point_cur = {
-                'x': mesh.vertices[corner_id],
-                'u': uv[corner_id, 0]
+                'x': cut_path[i],
             }
-            cut_path = [point_cur['x']]
-
-            faces = mesh.vertex_faces[corner_id]
+            visited_eids = set()
+            path2_u_dir = cut_path[i] - cut_path[i - 1]
+            path2_u_dir = path2_u_dir / np.linalg.norm(path2_u_dir)
 
             while True:
                 
                 mask = faces != -1
                 unique_faces = faces[mask]
-                related_edges = mesh.faces_unique_edges[unique_faces]
+                related_edges = mesh_local.faces_unique_edges[unique_faces]
                 related_edges = np.unique(related_edges)
                 
-                sample_pts = []
+                candidate_list = []
                 for eid in related_edges:
+                    
+                    if eid in visited_eids:
+                        continue
 
-                    e = mesh.edges_unique[eid]
-                    samples = np.linspace(0, 1, sample_num)
-                    for t in samples:
-                        sample_x = mesh.vertices[e[0]] * (1-t) + mesh.vertices[e[1]] * t
-                        sample_u = uv[e[0], 0] * (1-t) + uv[e[1], 0] * t
-                        
-                        d_x_norm = np.linalg.norm(sample_x - point_cur['x'])
-                        d_u_norm = sample_u - point_cur['u']
+                    e = mesh_local.edges_unique[eid]
+                    u0 = uv[e[0], 0]
+                    u1 = uv[e[1], 0]
+                    if u0 > u1:
+                        e = e[::-1]
+                        u0, u1 = u1, u0
 
-                        if abs(d_x_norm) < 1e-7:
-                            derivative = 0
+                    visited_eids.add(eid)
+
+                    if u0 <= trace_u <= u1:
+                        de_u = u1 - u0
+
+                        if abs(de_u) < 1e-7:
+                            r_list = [0, 1]
                         else:
-                            derivative = d_u_norm / d_x_norm
+                            r_list = [(trace_u - u0) / de_u]
+                        
+                        for r in r_list:
 
-                        sample_pts.append({
-                            'x': sample_x,
-                            'u': sample_u,
-                            'derivative': derivative,
-                            't': t,
-                            'eid': eid
-                        })
-
-                sample_pts = sorted(sample_pts, key=lambda x: x['derivative'], reverse=True)
-                point_next = sample_pts[0]
-                cut_path.append(point_next['x'])
-
-                if abs(point_next['u'] - 1) < 1e-7:
-                    d, vid = self.pq_mesh.vertex(point_next['x'])
-                    vid_c.append(vid)
+                            sample_x = mesh_local.vertices[e[0]] * (1-r) + mesh_local.vertices[e[1]] * r
+                            d = np.linalg.norm(sample_x - point_cur['x'])
+                            if d < 1e-7:
+                                continue
+                            
+                            point_candidate = {
+                                'x': sample_x,
+                                'd': d,
+                                'eid': eid
+                            }
+                            candidate_list.append(point_candidate)
+                
+                if len(candidate_list) == 0:
                     break
-                else:
-                    point_cur = point_next
-                    e = mesh.edges_unique[point_next['eid']]
-                    # adj_index = mesh.face_adjacency_edges_tree.query([e])[1]
-                    # faces = mesh.face_adjacency[adj_index]
-                    faces = mesh.vertex_faces[e].flatten()
+                
+                candidate_list = sorted(candidate_list, key=lambda x: x['d'], reverse=True)
+                point_next = candidate_list[0]
+
+                round_path.append(point_next['x'])
+                point_cur = point_next
+                
+                e = mesh_local.edges_unique[point_next['eid']]
+                faces = mesh_local.vertex_faces[e].flatten()
             
-            throughhole_paths.append(np.array(cut_path))
-            # cut_path = np.array(cut_path)
+            # round_path.append(round_path[0])
+            round_path = np.array(round_path)
+            round_center = round_path.mean(axis=0)
+            opposite_point = round_center - cut_path[i]
+            opposite_dir = opposite_point / np.linalg.norm(opposite_point)
+            
+            # round_path_seg = None
+            p_cos_list = []
+            for j in range(len(round_path)):
+                p = round_path[j]
+                p_dir = p - round_center
+                p_dir = p_dir / np.linalg.norm(p_dir)
+                p_cos = np.dot(p_dir, opposite_dir)
+                p_cos_list.append(p_cos)
+
+            p_cos_maxidx = np.argmax(p_cos_list)
+            p_cos_max = -1
+            mid_point = None
+            for j in range(p_cos_maxidx - 3, p_cos_maxidx + 3):
+                samples = np.linspace(0, 1, 10)
+                for t in samples:
+                    p = round_path[j] * (1-t) + round_path[j+1] * t
+                    p_dir = p - round_center
+                    p_dir = p_dir / np.linalg.norm(p_dir)
+                    p_cos_oppo = np.dot(p_dir, opposite_dir)
+                    p_dir_u = p - cut_path2[-1]
+                    p_dir_u = p_dir_u / np.linalg.norm(p_dir_u)
+                    p_cos_u = np.dot(p_dir_u, path2_u_dir)
+                    p_cos = p_cos_oppo + p_cos_u
+                    
+                    if p_cos_max < p_cos:
+                        p_cos_max = p_cos
+                        mid_point = p
+        
+            cut_path2.append(mid_point)
+
+            # round_spheres = create_spheres(round_path, radius=vis_size, color=(0,200,0))
+            # starting_sphere = create_spheres(round_path[0], radius=vis_size * 1.5, color=(200,0,200))
+            # last_sphere = create_spheres(round_path[-2], radius=vis_size * 1.5, color=(0,200,200))
+            # mid_sphere = create_spheres(cut_path2[-1], radius=vis_size * 1.5, color=(200,0,0))  
+            # vis = [round_spheres, mid_sphere, starting_sphere, last_sphere]
+            # for p in range(1, len(round_path)):
+            #     lines = create_lines(round_path[p-1], round_path[p], radius=vis_size / 2, color=(0,0,200))
+            #     vis.append(lines)
+            # vis = trimesh.util.concatenate(vis)
+            
+            # vis.export(str(out_dir / f'{exp_name.stem}_debug_round_{i}.obj'))
+        
+        vidcs = []
+        closest_idx, closest_d = self.find_closest_point_on_boundary(cut_path[-1], self.boundary_list[bidx_c].points)
+        vidcs.append(self.boundary_list[bidx_c].boundary_vertex_indices[closest_idx])
+        
+        closest_idx, closest_d = self.find_closest_point_on_boundary(cut_path2[-1], self.boundary_list[bidx_c].points)
+        vidcs.append(self.boundary_list[bidx_c].boundary_vertex_indices[closest_idx])
         
         # Update boundary fixed indices
         self.boundary_list[bidx].fixed_indices.add(a0)
         self.boundary_list[bidx].fixed_indices.add(a1)
-        self.boundary_list[bidx_c].fixed_indices.add(vid_c[0])
-        self.boundary_list[bidx_c].fixed_indices.add(vid_c[1])
+        self.boundary_list[bidx_c].fixed_indices.add(vidcs[0])
+        self.boundary_list[bidx_c].fixed_indices.add(vidcs[1])
 
-        # throughhole_paths = [a0_boundary_path, a1_boundary_path]
+        throughhole_paths = [cut_path, cut_path2]
         
         return throughhole_paths
     
+
     def cut_mask(self, mask_id, annulus_cut_flag:bool = False):
         if annulus_cut_flag:
             logger.debug(f"Cut annulus mask, mask id {mask_id}")
