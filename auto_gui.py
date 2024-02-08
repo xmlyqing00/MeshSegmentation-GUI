@@ -5,12 +5,13 @@ from copy import deepcopy
 from view_psd_data import *
 import shutil
 import argparse
+import datetime
 from loguru import logger
 import matplotlib
 import matplotlib.cm as cm
 
 from vedo import Mesh as VedoMesh
-from vedo import show, Plotter, Arrows, Sphere, Spheres, Text2D, Line
+from vedo import show, Plotter, Arrows, write, Sphere, Spheres, Text2D, Line
 
 from mesh_segmentor import MeshSegmentator
 
@@ -78,8 +79,23 @@ class AutoSegGUI:
         self.show_original = True
         self.content = []
 
+        self.save()
+
         self.render_mesh(self.init_mesh)
         # self.render_mesh(self.refined_mesh)
+
+    def save(self):
+
+        obj_path = os.path.join(self.output_dir, 'segmented_mesh.ply')
+        viz_obj_path = os.path.join(self.output_dir, 'segmentation_viz.ply')
+        mask_path = os.path.join(self.output_dir, 'mask.json')
+
+        with open(mask_path, 'w') as f:
+            json.dump(self.refined_mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
+
+        tri_mesh = trimesh.Trimesh(self.segmentor.mesh.vertices, self.segmentor.mesh.faces, process=False, maintain_order=True)
+        tri_mesh.export(obj_path)
+        write(self.refined_mesh, viz_obj_path)
 
 
     def update_mesh_color(self, mesh, mask):
@@ -175,6 +191,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser('Segmentation GUI')
     parser.add_argument('--input', type=str, default='167', help='Input mesh path.')
+    parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--smooth', action='store_true', help='Smooth the boundary.')
     parser.add_argument('--smooth-deg', type=int, default=4, help='Degree of the smooth boundary.')
     args = parser.parse_args()
@@ -190,11 +207,19 @@ if __name__ == "__main__":
     msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 
     msg.text(help_text)
 
-    save_dir = "output_throughhole"
-    if os.path.exists(save_dir):
-        print("remove", save_dir)
-        shutil.rmtree(save_dir, ignore_errors=True)
-    os.makedirs(save_dir, exist_ok=True)
+    # save_dir = "output_throughhole"
+    # if os.path.exists(save_dir):
+    #     print("remove", save_dir)
+    #     shutil.rmtree(save_dir, ignore_errors=True)
+    # os.makedirs(save_dir, exist_ok=True)
+
+    current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    output_dir = os.path.join(args.outdir, f'auto_{args.input}_{current_time}')
+    if os.path.exists(output_dir):
+        logger.warning(f'Output directory {output_dir} already exists. Will overwrite.')
+    else:
+        logger.info(f'Create output directory: {output_dir}.')
+        os.makedirs(output_dir)
 
     ## load mesh
     shape_id = args.input
@@ -203,7 +228,7 @@ if __name__ == "__main__":
     mesh = VedoMesh(fpath)
     
     plt = Plotter(axes=8, bg='white', size=(1200, 800))
-    gui = AutoSegGUI(mesh, mask, save_dir, plt, args.smooth, args.smooth_deg)
+    gui = AutoSegGUI(mesh, mask, output_dir, plt, args.smooth, args.smooth_deg)
 
     plt.add_callback('key press', gui.on_key_press)
     plt.add(msg)

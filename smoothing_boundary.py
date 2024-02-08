@@ -576,7 +576,8 @@ if __name__ == '__main__':
         segmented_mesh, boundary_curves, 
         args.iters, args.boundary_resample, args.edge_flip, args.laplacian
     )
-    segmented_mesh.export(f'segmented_mesh_final.ply')
+    export_path = Path(args.outdir) / f'segmented_mesh_smoothed.ply'
+    segmented_mesh.export(str(export_path))
     # export_path = str(outdir / f'segmented_mesh_smoothed_{args.iters}.ply')
     # if args.edge_flip:
     #     export_path = export_path.replace('.ply', '_edge_flip.ply')

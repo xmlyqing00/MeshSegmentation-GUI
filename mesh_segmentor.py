@@ -785,26 +785,84 @@ class MeshSegmentator():
         for i in range(len(self.boundary_list)):
 
             # print("boundary", i, self.boundary_list[i].points)
-            pt_num = len(self.boundary_list[i].points)
-            sample_pt_num = max(self.smooth_deg, int(pt_num * 0.1))
-            logger.debug(f'\tBoundary {i} has {pt_num} points. Sample {sample_pt_num} points.')
-            sampled_ids = np.linspace(0, pt_num-1, sample_pt_num, dtype=np.int32).tolist()
-            for fixed_pt in list(self.boundary_list[i].fixed_indices):
-                fixed_pt_idx = self.boundary_list[i].boundary_vertex_indices.index(fixed_pt)
-                insert_pos = bisect.bisect_left(sampled_ids, fixed_pt_idx)
-                if sampled_ids[insert_pos] != fixed_pt_idx:
-                    sampled_ids.insert(insert_pos, fixed_pt_idx)
-            sampled_pts = self.boundary_list[i].points[sampled_ids]
-            d, vertex_ids = self.pq_mesh.vertex(np.array(sampled_pts))
-            new_points = []
-            for j in range(1, len(vertex_ids)):
-                path_pts = self.mesh_path_solver.solve(vertex_ids[j-1], vertex_ids[j])
-                if j == 1:
-                    new_points.extend(path_pts) # Add the first pt to make a loop
-                else:
-                    new_points.extend(path_pts[1:])
+            if len(self.boundary_list[i].fixed_indices) > 0:
 
-            self.boundary_list[i].points = np.array(new_points)
+                fixed_pts = self.mesh.vertices[list(self.boundary_list[i].fixed_indices)]
+                print('fixed_pts', fixed_pts)
+
+                opt_iters = 3
+                for _ in range(opt_iters):
+                    
+                    pt_num = len(self.boundary_list[i].points)
+                    d = np.linalg.norm(fixed_pts[np.newaxis, :] - self.boundary_list[i].points[:, np.newaxis], axis=-1)
+                    fixed_boundary_ids = np.argmin(d, axis=0).tolist()
+                    fixed_boundary_ids.append(fixed_boundary_ids[0] + pt_num)
+                    
+                    sampled_ids = [fixed_boundary_ids[0]]
+                    for fixed_idx in range(1, len(fixed_boundary_ids)):
+                        fixed_id0 = fixed_boundary_ids[fixed_idx-1]
+                        fixed_id1 = fixed_boundary_ids[fixed_idx]
+                        sample_num = min(self.smooth_deg, fixed_id1 - fixed_id0 - 1)
+                        if sample_num > 0:
+                            sampled_ids_interval = np.linspace(fixed_id0, fixed_id1, sample_num, dtype=np.int32)
+                            step = (fixed_id1 - fixed_id0) // (sample_num + 1)
+                            sampled_ids_interval = sampled_ids_interval + np.random.randint(-step//2, step//2, sample_num)
+                            sampled_ids_interval = sampled_ids_interval.tolist()
+                            sampled_ids.extend(sampled_ids_interval[1:-1])
+                        sampled_ids.append(fixed_id1)
+
+                    sampled_ids = np.array(sampled_ids) % pt_num
+                    print('sampled_ids', sampled_ids)
+                    
+                    sampled_pts = self.boundary_list[i].points[sampled_ids]
+                    d, vertex_ids = self.pq_mesh.vertex(np.array(sampled_pts))
+                    new_points = []
+                    for j in range(1, len(vertex_ids)):
+                        if vertex_ids[j-1] == vertex_ids[j]:
+                            path_pts = [self.mesh.vertices[vertex_ids[j]]]
+                        else:
+                            path_pts = self.mesh_path_solver.solve(vertex_ids[j-1], vertex_ids[j])
+                        if j == 1:
+                            new_points.extend(path_pts) # Add the first pt to make a loop
+                        else:
+                            new_points.extend(path_pts[1:])
+
+                    self.boundary_list[i].points = np.array(new_points)
+            else:
+                opt_iters = 3
+                for _ in range(opt_iters):
+                    pt_num = len(self.boundary_list[i].points)
+                    sample_pt_num = min(max(self.smooth_deg, int(pt_num * 0.1)), pt_num)
+                    logger.debug(f'\tBoundary {i} has {pt_num} points. Sample {sample_pt_num} points.')
+                    sampled_ids = np.linspace(0, pt_num-1, sample_pt_num, dtype=np.int32).tolist()
+                    print('init', sampled_ids)
+                    for k in range(1, len(sampled_ids) - 1):
+                        new_sample_id = np.random.randint(
+                            int(sampled_ids[k-1] * 0.2 + sampled_ids[k] * 0.8), 
+                            int(sampled_ids[k] * 0.8 + sampled_ids[k+1] * 0.2)
+                        )
+                        sampled_ids[k] = new_sample_id
+                    print('add noise', sampled_ids)
+                    
+                    sampled_pts = self.boundary_list[i].points[sampled_ids]
+                    d, vertex_ids = self.pq_mesh.vertex(np.array(sampled_pts))
+                    new_points = []
+                    for j in range(1, len(vertex_ids)):
+                        if vertex_ids[j-1] == vertex_ids[j]:
+                            path_pts = [self.mesh.vertices[vertex_ids[j]]]
+                        else:
+                            path_pts = self.mesh_path_solver.solve(vertex_ids[j-1], vertex_ids[j])
+                        if j == 1:
+                            new_points.extend(path_pts) # Add the first pt to make a loop
+                        else:
+                            new_points.extend(path_pts[1:])
+
+                    self.boundary_list[i].points = np.array(new_points)
+                # self.boundary_list[i].boundary_vertex_indices = []
+                # for pt in new_points:
+                #     d, vid = self.pq_mesh.vertex(pt)
+                #     print(pt, d, vid)
+                #     self.boundary_list[i].boundary_vertex_indices.append(vid)
 
 
     def __call__(self, b_close_holes:bool = None):
@@ -851,55 +909,57 @@ class MeshSegmentator():
             self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
 
 
-        # Build boundary and mask patches, Cut masks
-        self.boundary_list = []
-        self.patch_topo_list = []
-        for i in range(len(self.mask)):
-            mask_type = self.build_mask_structure(i)
-            if mask_type == 'other':
-                self.cut_mask(i)
-            elif mask_type == 'annulus':
-                self.cut_mask(i, annulus_cut_flag=True)
+        cut_mesh_flag = True
+        if cut_mesh_flag:
+            # Build boundary and mask patches, Cut masks
+            self.boundary_list = []
+            self.patch_topo_list = []
+            for i in range(len(self.mask)):
+                mask_type = self.build_mask_structure(i)
+                if mask_type == 'other':
+                    self.cut_mask(i)
+                elif mask_type == 'annulus':
+                    self.cut_mask(i, annulus_cut_flag=True)
 
-        # Align endpoints
-        for boundary_obj in self.boundary_list:
-            # if boundary_obj.id != 6:
-                # continue
-            mask_ids = list(boundary_obj.mask_ids)
-            if len(mask_ids) != 2:
-                logger.warning(f'A boundary doesn\'t connect to two patches! {mask_ids}. Skip!')
-                continue            
-            if self.patch_topo_list[mask_ids[0]].type == 'disk' or self.patch_topo_list[mask_ids[1]].type == 'disk':
-                logger.info('One patch is a disk. Skip!')
-                continue
-            else:
-                logger.info(f'Align a {self.patch_topo_list[mask_ids[0]].type} and {self.patch_topo_list[mask_ids[1]].type}')
-                if self.patch_topo_list[mask_ids[0]].type == 'other':
-                    print("mask_ids[0]", mask_ids[0])
-                self.align_cuts(boundary_obj)
+            # Align endpoints
+            for boundary_obj in self.boundary_list:
+                # if boundary_obj.id != 6:
+                    # continue
+                mask_ids = list(boundary_obj.mask_ids)
+                if len(mask_ids) != 2:
+                    logger.warning(f'A boundary doesn\'t connect to two patches! {mask_ids}. Skip!')
+                    continue            
+                if self.patch_topo_list[mask_ids[0]].type == 'disk' or self.patch_topo_list[mask_ids[1]].type == 'disk':
+                    logger.info('One patch is a disk. Skip!')
+                    continue
+                else:
+                    logger.info(f'Align a {self.patch_topo_list[mask_ids[0]].type} and {self.patch_topo_list[mask_ids[1]].type}')
+                    if self.patch_topo_list[mask_ids[0]].type == 'other':
+                        print("mask_ids[0]", mask_ids[0])
+                    self.align_cuts(boundary_obj)
 
 
-        # logger.success("cut annulus patches")
-        # for patch in self.patch_topo_list:
-        #     if patch.type == "annulus":
-        #         self.cut_annulus_aligned(patch)
+            # logger.success("cut annulus patches")
+            # for patch in self.patch_topo_list:
+            #     if patch.type == "annulus":
+            #         self.cut_annulus_aligned(patch)
 
-        self.split_mesh_with_cuts()
+            self.split_mesh_with_cuts()
 
-        ## 
-        picked_pt_ids = []
-        for cut in self.cut_list:
-            if cut.dead:
-                continue
-            _, vids = self.pq_mesh.vertex(cut.points)
-            picked_pt_ids.append(vids.tolist())
-        for boundary in self.boundary_list:
-            _, vids = self.pq_mesh.vertex(boundary.points)
-            picked_pt_ids.append(vids.tolist())
+            ## 
+            picked_pt_ids = []
+            for cut in self.cut_list:
+                if cut.dead:
+                    continue
+                _, vids = self.pq_mesh.vertex(cut.points)
+                picked_pt_ids.append(vids.tolist())
+            for boundary in self.boundary_list:
+                _, vids = self.pq_mesh.vertex(boundary.points)
+                picked_pt_ids.append(vids.tolist())
 
-        logger.info(f'Add cuts {len(self.cut_list)} and boundaries {len(self.boundary_list)} for floodfill.')
-        ## convert cut edges to mesh edges
-        self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
+            logger.info(f'Add cuts {len(self.cut_list)} and boundaries {len(self.boundary_list)} for floodfill.')
+            ## convert cut edges to mesh edges
+            self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
 
 
 if __name__ == "__main__":
