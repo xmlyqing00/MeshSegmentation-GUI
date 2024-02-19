@@ -89,6 +89,8 @@ if __name__ == '__main__':
     # meshfile = f'./output/{args.model_name}/smoothed_mesh_19.obj'
     # meshfile = f'./output/{args.model_name}/segmented_mesh_final.ply'
     maskfile = f'./output/{args.model_name}/mask.json'
+    if os.path.exists(meshfile) is False:
+        meshfile = f'./output/{args.model_name}/segmented_mesh.ply'
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
     

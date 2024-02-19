@@ -534,6 +534,8 @@ def apply_mask(segmented_mesh: trimesh.Trimesh, mask: list):
 
 def import_mesh_mask(outdir: Path):
     segmented_mesh_path = outdir / 'segmented_mesh.ply'
+    if not segmented_mesh_path.exists():
+        segmented_mesh_path = outdir / 'segmented_mesh.obj'
     segmented_mesh = trimesh.load(segmented_mesh_path, process=False, maintain_order=True)
     
     mask_path = outdir / 'mask.json'

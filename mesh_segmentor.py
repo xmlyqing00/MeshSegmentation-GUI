@@ -790,15 +790,26 @@ class MeshSegmentator():
                 fixed_pts = self.mesh.vertices[list(self.boundary_list[i].fixed_indices)]
                 print('fixed_pts', fixed_pts)
 
+                boundary_loop_flag = False
+                d = np.linalg.norm(self.boundary_list[i].points[0] - self.boundary_list[i].points[-1])
+                if d < 1e-7:
+                    boundary_loop_flag = True
+
                 opt_iters = 3
                 for _ in range(opt_iters):
                     
                     pt_num = len(self.boundary_list[i].points)
+                    logger.debug(f'\tBoundary {i} has {pt_num} points.')
                     d = np.linalg.norm(fixed_pts[np.newaxis, :] - self.boundary_list[i].points[:, np.newaxis], axis=-1)
                     fixed_boundary_ids = np.argmin(d, axis=0).tolist()
-                    fixed_boundary_ids.append(fixed_boundary_ids[0] + pt_num)
-                    
-                    sampled_ids = [fixed_boundary_ids[0]]
+                    if boundary_loop_flag:
+                        fixed_boundary_ids.append(fixed_boundary_ids[0] + pt_num)
+                        sampled_ids = [fixed_boundary_ids[0]]
+                    else:
+                        sampled_ids = [0]
+                        if fixed_boundary_ids[0] > 0:
+                            sampled_ids.append(fixed_boundary_ids[0])
+
                     for fixed_idx in range(1, len(fixed_boundary_ids)):
                         fixed_id0 = fixed_boundary_ids[fixed_idx-1]
                         fixed_id1 = fixed_boundary_ids[fixed_idx]
@@ -810,6 +821,10 @@ class MeshSegmentator():
                             sampled_ids_interval = sampled_ids_interval.tolist()
                             sampled_ids.extend(sampled_ids_interval[1:-1])
                         sampled_ids.append(fixed_id1)
+
+                    print('xxx', sampled_ids)
+                    if not boundary_loop_flag and sampled_ids[-1] != pt_num - 1:
+                        sampled_ids.append(pt_num - 1)
 
                     sampled_ids = np.array(sampled_ids) % pt_num
                     print('sampled_ids', sampled_ids)
@@ -909,6 +924,7 @@ class MeshSegmentator():
             self.mask = floodfill_label_mesh(self.mesh, set(), picked_pt_ids)
 
 
+        print('Num of mask', len(self.mask))
         cut_mesh_flag = True
         if cut_mesh_flag:
             # Build boundary and mask patches, Cut masks
@@ -916,6 +932,7 @@ class MeshSegmentator():
             self.patch_topo_list = []
             for i in range(len(self.mask)):
                 mask_type = self.build_mask_structure(i)
+                print(i, self.patch_topo_list[i].extend_boundary_ids)
                 if mask_type == 'other':
                     self.cut_mask(i)
                 elif mask_type == 'annulus':
@@ -937,12 +954,6 @@ class MeshSegmentator():
                     if self.patch_topo_list[mask_ids[0]].type == 'other':
                         print("mask_ids[0]", mask_ids[0])
                     self.align_cuts(boundary_obj)
-
-
-            # logger.success("cut annulus patches")
-            # for patch in self.patch_topo_list:
-            #     if patch.type == "annulus":
-            #         self.cut_annulus_aligned(patch)
 
             self.split_mesh_with_cuts()
 
