@@ -15,3 +15,6 @@ tmp/
 
 data_built/
 preprocessing/
+
+data_built_harmonic/
+data_built_BPE_harmonic/
