@@ -153,13 +153,13 @@ class ComplexBuilder():
     
 
     def main_build(self):
-        print("main build")
+        # print("main build")
         patch_topology_graph = []
         all_arcs = []
         ## we find the closest points in each patch to dup_vert_coords_larger_than_2
 
         for patch_name, m in enumerate(self.mask):
-            print("patch name", patch_name)
+            # print("patch name", patch_name)
             patch_mesh = self.base.submesh([m], only_watertight=False)[0]
 
             ## get corner point indices
@@ -207,7 +207,7 @@ class ComplexBuilder():
                 patch_topology['arc_reverse'].append(arc_reverse)
 
             ## handling the final
-            print(len(patch_scaffold_vids), len(crn_ids), len(self.scaffold_corner_ids))
+            # print(len(patch_scaffold_vids), len(crn_ids), len(self.scaffold_corner_ids))
             corner_ids = [patch_scaffold_vids[crn_ids[-1]], patch_scaffold_vids[crn_ids[0]]]
             vertices = patch_scaffold_vids[crn_ids[-1]:]
             vertices = np.concatenate([vertices, patch_scaffold_vids[:crn_ids[0]+1]])

@@ -86,6 +86,7 @@ class AutoSegGUI:
 
     def save(self):
 
+        logger.info(f'Save refined mesh and segmentation mask to {self.output_dir}.')
         obj_path = os.path.join(self.output_dir, 'segmented_mesh.ply')
         viz_obj_path = os.path.join(self.output_dir, 'segmentation_viz.ply')
         mask_path = os.path.join(self.output_dir, 'mask.json')
@@ -96,6 +97,8 @@ class AutoSegGUI:
         tri_mesh = trimesh.Trimesh(self.segmentor.mesh.vertices, self.segmentor.mesh.faces, process=False, maintain_order=True)
         tri_mesh.export(obj_path)
         write(self.refined_mesh, viz_obj_path)
+
+        logger.info(f'Save refined mesh to {obj_path}. Done.')
 
 
     def update_mesh_color(self, mesh, mask):

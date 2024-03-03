@@ -394,6 +394,8 @@ def refinement(
         laplician_flag: bool=False,
     ):
 
+    logger.info(f'Boundary curve number: {len(boundary_curves)}')
+
     boundary_vertex_ids = []
     for bcurve in boundary_curves:
         boundary_vertex_ids.extend(bcurve)
@@ -441,6 +443,8 @@ def refinement(
     return segmented_mesh, viz_list
 
 def trace_boundary_curves(boundary_edges):
+
+    logger.info(f'Boundary edge number: {len(boundary_edges)}')
 
     ## find intersection points (those appear more than twice)
     vertex_count = {}

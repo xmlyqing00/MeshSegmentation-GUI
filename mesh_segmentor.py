@@ -477,7 +477,7 @@ class MeshSegmentator():
             p_cos_maxidx = np.argmax(p_cos_list)
             p_cos_max = -1
             mid_point = None
-            for j in range(p_cos_maxidx - 3, p_cos_maxidx + 3):
+            for j in range(max(0, p_cos_maxidx - 3), min(p_cos_maxidx + 3, len(round_path)-1)):
                 samples = np.linspace(0, 1, 10)
                 for t in samples:
                     p = round_path[j] * (1-t) + round_path[j+1] * t
@@ -772,7 +772,7 @@ class MeshSegmentator():
         for cut in self.cut_list:
             if cut.dead:
                 continue
-            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, 0.2)
+            new_mesh, new_mask = split_mesh(self.mesh, list(cut.points), self.mesh.faces, 0.2)
             self.mesh = new_mesh
             self.mask = new_mask
 
@@ -847,7 +847,7 @@ class MeshSegmentator():
                 opt_iters = 3
                 for _ in range(opt_iters):
                     pt_num = len(self.boundary_list[i].points)
-                    sample_pt_num = min(max(self.smooth_deg, int(pt_num * 0.1)), pt_num)
+                    sample_pt_num = min(max(self.smooth_deg, int(pt_num * 0.2)), pt_num)
                     logger.debug(f'\tBoundary {i} has {pt_num} points. Sample {sample_pt_num} points.')
                     sampled_ids = np.linspace(0, pt_num-1, sample_pt_num, dtype=np.int32).tolist()
                     print('init', sampled_ids)
@@ -926,6 +926,7 @@ class MeshSegmentator():
 
         print('Num of mask', len(self.mask))
         cut_mesh_flag = True
+        align_flag = True
         if cut_mesh_flag:
             # Build boundary and mask patches, Cut masks
             self.boundary_list = []
@@ -939,21 +940,23 @@ class MeshSegmentator():
                     self.cut_mask(i, annulus_cut_flag=True)
 
             # Align endpoints
-            for boundary_obj in self.boundary_list:
-                # if boundary_obj.id != 6:
-                    # continue
-                mask_ids = list(boundary_obj.mask_ids)
-                if len(mask_ids) != 2:
-                    logger.warning(f'A boundary doesn\'t connect to two patches! {mask_ids}. Skip!')
-                    continue            
-                if self.patch_topo_list[mask_ids[0]].type == 'disk' or self.patch_topo_list[mask_ids[1]].type == 'disk':
-                    logger.info('One patch is a disk. Skip!')
-                    continue
-                else:
-                    logger.info(f'Align a {self.patch_topo_list[mask_ids[0]].type} and {self.patch_topo_list[mask_ids[1]].type}')
-                    if self.patch_topo_list[mask_ids[0]].type == 'other':
-                        print("mask_ids[0]", mask_ids[0])
-                    self.align_cuts(boundary_obj)
+
+            if align_flag:
+                for boundary_obj in self.boundary_list:
+                    # if boundary_obj.id != 6:
+                        # continue
+                    mask_ids = list(boundary_obj.mask_ids)
+                    if len(mask_ids) != 2:
+                        logger.warning(f'A boundary doesn\'t connect to two patches! {mask_ids}. Skip!')
+                        continue            
+                    if self.patch_topo_list[mask_ids[0]].type == 'disk' or self.patch_topo_list[mask_ids[1]].type == 'disk':
+                        logger.info('One patch is a disk. Skip!')
+                        continue
+                    else:
+                        logger.info(f'Align a {self.patch_topo_list[mask_ids[0]].type} and {self.patch_topo_list[mask_ids[1]].type}')
+                        if self.patch_topo_list[mask_ids[0]].type == 'other':
+                            print("mask_ids[0]", mask_ids[0])
+                        self.align_cuts(boundary_obj)
 
             self.split_mesh_with_cuts()
 

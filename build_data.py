@@ -7,16 +7,22 @@ import trimesh
 import argparse
 import numpy as np
 import json
+import igl
 from src.utils import NpEncoder
-from igl_parameterization import parameterize_mesh
+from igl_parameterization import parameterize_mesh, parameterize_mesh_with_boundary_len
 from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
 from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
 from PIL import Image
+import matplotlib
+from matplotlib import cm
+from pathlib import Path
+
 
 def read_json(file):
     with open(file, 'r') as f:
         data = json.load(f)
     return data
+
 
 def write_json(data, file):
     with open(file, 'w') as f:
@@ -52,6 +58,7 @@ def count_foldover_triangles(mesh, threshold):
     flipped_faces = np.unique(face_pairs[face_pair_mask])
     return flipped_faces
 
+
 ## can draw line segments
 def write_line_file2(save_to, V, L, C=None, vid_start=1):
     with open(save_to, 'w') as f:
@@ -68,13 +75,15 @@ def write_line_file2(save_to, V, L, C=None, vid_start=1):
                 line = f"{line}{i+vid_start} "
             f.write(line+'\n')
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Modeling 3D shapes with neural patches")
-    parser.add_argument("--model_name",
+    parser.add_argument("--datadir",
                         required=True,
                         type=str,
                         help="path to config"
                         )
+    parser.add_argument('--method', type=str, default='harmonic', help='parameterization method')
     
     args = parser.parse_args()
     return args
@@ -85,26 +94,21 @@ if __name__ == '__main__':
     args = parse_args()
 
     ## read data
-    meshfile = f'./output/{args.model_name}/segmented_mesh.obj'
-    # meshfile = f'./output/{args.model_name}/smoothed_mesh_19.obj'
-    # meshfile = f'./output/{args.model_name}/segmented_mesh_final.ply'
-    maskfile = f'./output/{args.model_name}/mask.json'
-    if os.path.exists(meshfile) is False:
-        meshfile = f'./output/{args.model_name}/segmented_mesh.ply'
+    data_dir = Path(args.datadir)
+    meshfile = data_dir /'segmented_mesh_smoothed.obj'
+    maskfile = data_dir / 'mask.json'
+    if meshfile.exists() is False:
+        meshfile = data_dir /'segmented_mesh_smoothed.ply'
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
-    
+
     texture_img = Image.open(f'./assets/uv_color.png')
 
     ## root folder
-    root_dir = f'./data_built/{args.model_name}'
-    if not os.path.exists(root_dir):
-        os.makedirs(root_dir)
-    else:
-        shutil.rmtree(root_dir)
-        os.makedirs(root_dir)
+    root_dir = Path(f'./data_built_{args.method}') / data_dir.name
+    root_dir.mkdir(parents=True, exist_ok=True)
 
-    savefolder = f'{root_dir}/data'
+    savefolder = root_dir / 'data'
     if not os.path.exists(savefolder):
         os.makedirs(savefolder)
 
@@ -114,14 +118,11 @@ if __name__ == '__main__':
     # complex_builder.save_complex(graph, root_dir)
     
     # print(graph)
-    write_json(graph, os.path.join(savefolder, "topology_graph.json"))
-    shutil.copyfile(maskfile, os.path.join(savefolder, 'mask.json'))
+    write_json(graph, savefolder / "topology_graph.json")
+    shutil.copyfile(maskfile, savefolder / 'mask.json')
 
     ## cell arc lengths
     cell_arc_lengths = get_boundary_length_from_mask(mesh, mask, graph)
-    # for cl in cell_arc_lengths:
-    #     print(cl)
-    # write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
     
     ## save normalized mesh
     savemeshfolder = f'{savefolder}/single'
@@ -130,7 +131,6 @@ if __name__ == '__main__':
     save_meshfile = os.path.join(savemeshfolder, 'mesh.obj')
     mesh = normalize_data(mesh)
     mesh.export(save_meshfile)
-
 
     ## parameterization
     savepatchfolder = f'{root_dir}/parameterization'
@@ -142,33 +142,83 @@ if __name__ == '__main__':
     node_ids = np.array(graph['node_ids'], dtype=np.int32)
     cells = graph['cells']
 
+    assert args.method in ['harmonic', 'BPE_harmonic'], "Only support harmonic and BPE_harmonic parameterization"
+    if args.method == 'BPE_harmonic':
+
+        BPE_resdir = data_dir / 'BPE'
+        BPE_resdir.mkdir(parents=True, exist_ok=True)
+
+        if os.sys.platform == 'linux':
+            exe_path = '/mnt/e/Sources/bpe/x64/Release/BPE.exe'
+        else:
+            exe_path = 'E:/Sources/bpe/x64/Release/BPE.exe'
+                
     cell_arc_lengths = []
     for i in range(len(mask)):
-        # if i > 0:
-        #     break
 
         nodes = node_ids[cells[i]]
         corners = mesh.vertices[nodes]
         submesh = mesh.submesh([mask[i]], only_watertight=False)[0]
-
+        
         ## build proximity mesh
         pq_patch = trimesh.proximity.ProximityQuery(submesh)
         crn_ids = pq_patch.vertex(corners)[1].tolist()
         corners = submesh.vertices[crn_ids]
-        print("corners: ", corners)
-        # print("patchmesh.vertices", len(patchmesh.vertices))
-        # print("patchmesh.faces", len(patchmesh.faces))
-        # flipped = count_foldover_triangles(submesh, 135)
-        # print("flipped faces: ", len(flipped))
+        # print("corners: ", corners)
 
         ## parameterization
-        uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+        if args.method == 'BPE_harmonic':
+
+            submesh_path = BPE_resdir / f'mesh_{i}.ply'
+            print('submesh_path', submesh_path)
+            submesh.export(submesh_path)
+
+            cmd_str = f'{exe_path} {submesh_path}'
+            print('cmd_str', cmd_str)
+            os.system(cmd_str)
+
+            submesh_para_path = BPE_resdir / f'mesh_{i}_result.obj'
+            print('submesh_para_path', submesh_para_path, submesh_para_path.exists())
+            submesh_para = trimesh.load(submesh_para_path, process=False, maintain_order=True)
+
+            bnd = igl.boundary_loop(submesh.faces)
+            bnd_list = bnd.tolist()
+            list_boundary = []
+            # new_list_bnd = []
+            for crn_idx in range(len(crn_ids)):
+                bid0 = bnd_list.index(crn_ids[crn_idx])
+                bid1 = bnd_list.index(crn_ids[(crn_idx+1)%len(crn_ids)])
+                
+                if bid0 < bid1:
+                    list_boundary.append(bnd_list[bid0:bid1+1])
+                    # new_list_bnd += bnd_list[bid0:bid1]
+                else:
+                    list_boundary.append(bnd_list[bid0:] + bnd_list[:bid1+1])
+                    # new_list_bnd += bnd_list[bid0:] + bnd_list[:bid1]
+
+            ## compute the length of each boundary
+            list_boundary_length = []
+            for bnd in list_boundary:
+                bnd_length = 0
+                ## open curve
+                for bnd_idx in range(len(bnd)-1):
+                    bnd_length += np.linalg.norm(submesh_para.vertices[bnd[bnd_idx]] - submesh_para.vertices[bnd[bnd_idx+1]])
+                list_boundary_length.append(bnd_length)
+            
+            ## compute the ratio of each boundary to the circumference of a unit circle
+            list_boundary_length.insert(0, 0) ## add the cyclic start
+
+            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length)
+            if np.isnan(bnd_uv[0][0]):
+                print('NAN detected, re-parameterize')
+                uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+        
+        else:
+            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
         crn_uv = np.concatenate((crn_uv, np.zeros((crn_uv.shape[0], 1))), axis=1)
         bnd_uv = np.concatenate((bnd_uv, np.zeros((bnd_uv.shape[0], 1))), axis=1)
-        # for j, c in enumerate(corners):
-        #     write_obj_file(f'corner_{i}_{j}.obj', [c])
-        #     write_obj_file(f'corner_uv_{i}_{j}.obj', [crn_uv[j]])
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
 
         submesh.export(f'{savepatchfolder}/mesh_uv_{i}.obj')
@@ -177,18 +227,14 @@ if __name__ == '__main__':
         crn_points = np.stack([corners, crn_uv[:-1]], axis=1)
         crn_points = crn_points.reshape(-1,3)
         corner_links = np.stack([np.arange(0, len(crn_points), 2), np.arange(1, len(crn_points), 2)], axis=-1)
-        # write_line_file2(f"corner_links_{i}.obj", crn_points, corner_links)
 
         ## save parameterized mesh
         uv3d = np.concatenate((uv, np.zeros((uv.shape[0], 1))), axis=1)
         flat = trimesh.Trimesh(vertices=uv3d, faces=submesh.faces, process=False, maintain_order=True)
         flat.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
-        # flipped = count_foldover_triangles(submesh, 135)
-        # print("flat flipped faces: ", len(flipped))
         flat.export(f'{saveflatfolder}/flat_{i}.obj')
 
-        import matplotlib
-        from matplotlib import cm
+
         norm = matplotlib.colors.Normalize(0, 1, clip=True)
         mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
         colors = np.linspace(0,1,len(bnd_list))
@@ -200,6 +246,9 @@ if __name__ == '__main__':
         colors = colors.reshape(-1,3)
         boundary_links = np.stack([np.arange(0, len(points), 2), np.arange(1, len(points), 2)], axis=-1)
         # write_line_file2(f"boundary_links_{i}.obj", points, boundary_links, colors)
+
+        # break
+
 
     for cl in cell_arc_lengths:
         print(cl)

@@ -142,7 +142,8 @@ def split_mesh_by_path(mesh, face_patches, inserted_points, edges, intersection_
 def split_mesh(mesh, path_pts, face_patches, intersection_merged_threshold=0.15):
     ## add some noises to the path_pts, so we can quickly find the faces that the path intersects
     # path_pths_without_ends = path_pts[1:-1, :] ## remove the start and end
-    path_pths_without_ends = path_pts[:, :] 
+    # print('path_pts', path_pts)
+    path_pths_without_ends = np.array(path_pts)
     pq_mesh = trimesh.proximity.ProximityQuery(mesh)
     queries = np.array(path_pths_without_ends)
 
