@@ -7,6 +7,16 @@ import numpy as np
 import torch
 import time, datetime
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+    
 def read_json(fname):
     with open(fname) as handle:
         return json.load(handle, object_hook=OrderedDict)
@@ -14,7 +24,7 @@ def read_json(fname):
 
 def write_json(content, fname):
     with open(fname, 'w') as handle:
-        json.dump(content, handle, indent=4, sort_keys=False)
+        json.dump(content, handle, indent=4, sort_keys=False, cls=NpEncoder)
 
 
 def read_obj_file(filename):
