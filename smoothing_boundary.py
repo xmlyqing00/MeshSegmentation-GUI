@@ -442,7 +442,7 @@ def refinement(
 
     return segmented_mesh, viz_list
 
-def trace_boundary_curves(boundary_edges):
+def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
 
     logger.info(f'Boundary edge number: {len(boundary_edges)}')
 
@@ -460,6 +460,12 @@ def trace_boundary_curves(boundary_edges):
         if vertex_count[edge[0]] > 2 and edge[0] not in bifurcating_vertex_ids:
             bifurcating_vertex_ids.append(edge[0])
         if vertex_count[edge[1]] > 2 and edge[1] not in bifurcating_vertex_ids:
+            bifurcating_vertex_ids.append(edge[1])
+
+        ## open end
+        if vertex_count[edge[0]] == 1 and edge[0] not in bifurcating_vertex_ids:
+            bifurcating_vertex_ids.append(edge[0])
+        if vertex_count[edge[1]] == 1 and edge[1] not in bifurcating_vertex_ids:
             bifurcating_vertex_ids.append(edge[1])
 
     # bifurcating_count = {}
@@ -483,7 +489,9 @@ def trace_boundary_curves(boundary_edges):
                 curve = [edge[1], edge[0]]
                 break
         ## trace the curve until encountering a bifurcating vertex
+        cnt = 0
         while True:
+            cnt += 1
             for edge in boundary_edges:
                 if curve[-1] == edge[0]:
                     boundary_edges.remove(edge)
@@ -495,6 +503,14 @@ def trace_boundary_curves(boundary_edges):
                     break
             if curve[-1] in bifurcating_vertex_ids:
                 break
+
+            # if cnt > 100000:
+            #     logger.info('Infinite loop')
+            #     out = np.array(boundary_edges)    
+            #     remains = np.unique(out.flatten())
+            #     write_obj_file("infinite_loop_remain.obj", segmented_mesh.vertices[remains])
+            #     write_obj_file("infinite_loop_curve.obj", segmented_mesh.vertices[curve])
+            #     input("press any key to continue")            
         
         ## store
         boundary_curves.append(curve)
@@ -572,7 +588,10 @@ if __name__ == '__main__':
         segmented_mesh.visual.face_colors[group] = cmap[group_idx % 20]
 
     boundary_edges, boundary_pts = apply_mask(segmented_mesh, mask)
-    boundary_curves, bifurcating_vertex_ids = trace_boundary_curves(boundary_edges)
+
+    write_obj_file("boundary_points.obj", segmented_mesh.vertices[list(boundary_pts)])
+
+    boundary_curves, bifurcating_vertex_ids = trace_boundary_curves(boundary_edges, segmented_mesh)
 
     # write_obj_file("bifurcating_vertex_ids.obj", segmented_mesh.vertices[bifurcating_vertex_ids])
     # for i, bcurve in enumerate(boundary_curves):

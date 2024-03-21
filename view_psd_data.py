@@ -6,6 +6,7 @@ import os
 from glob import glob
 import json
 import argparse
+from vedo import Mesh, show, write, Line, utils
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -61,15 +62,27 @@ if __name__ == "__main__":
     fpath = f"./data/segmentation_data/*/{shape_id}.off"
     
     mesh, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"), textured=True)
-
+    vedo_mesh = Mesh(fpath)
+    
     if True:
         maskpath = f"./data/segmentation_data/segmentation_results/{shape_id}.seg"
         pred_mask = np.loadtxt(maskpath, dtype=int)
         print(pred_mask.shape)
         print(mesh.vertices.shape)
+        num_patches = len(np.unique(pred_mask))
 
-    # mask_path = f"{shape_id}_mask.json"
-    # with open(mask_path, 'w') as f:
-    #     json.dump(mask, f, cls=NpEncoder, ensure_ascii=False, indent=4)
-    # mesh.export(f"{shape_id}.obj")
-    mesh.show()
+        ## get color
+        norm = matplotlib.colors.Normalize(0, 20, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.tab20)
+        for cid in range(num_patches):
+            mask = pred_mask == cid
+            color = mapper.to_rgba(cid%20)
+            color = np.array(color)*255
+            color = color.astype(np.uint8)
+            vedo_mesh.cellcolors[mask] = color
+
+    vedo_mesh.show()
+    write(vedo_mesh, f"{shape_id}.obj")
+
+
+    
