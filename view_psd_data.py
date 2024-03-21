@@ -81,8 +81,14 @@ if __name__ == "__main__":
     ## load mesh
     shape_id = args.input
     fpath = f"./data/segmentation_data/*/{shape_id}.off"
-
+    
     mesh, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"), textured=True)
+
+    if True:
+        maskpath = f"./data/segmentation_data/segmentation_results/{shape_id}.seg"
+        pred_mask = np.loadtxt(maskpath, dtype=int)
+        print(pred_mask.shape)
+        print(mesh.vertices.shape)
 
     # mask_path = f"{shape_id}_mask.json"
     # with open(mask_path, 'w') as f:

@@ -47,6 +47,9 @@ class ComplexBuilder():
         self.mask = mask
         self.base = normalize_data(base_mesh)
         self.graph = None
+        self.savefolder = "debug"
+        if not os.path.exists(f'./{self.savefolder}'):
+            os.makedirs(f'./{self.savefolder}')
        
 
     def init_scaffold_vertices(self):
@@ -84,14 +87,15 @@ class ComplexBuilder():
         self.scaffold_corner_ids = np.where(vert_counts > 2)[0]
         self.scaffold_corner_ids = self.scaffold_corner_ids.tolist()
 
-        assert len(self.scaffold_corner_ids) > 0
-
         # ## get duplicated vertices' coordinates
-        # dup_vert_coords = self.base.vertices[self.scaffold_vids]
-        # write_obj_file(f'./{self.savefolder}/dup_verts.obj', dup_vert_coords)
-        # dup_vert_coords_larger_than_2 = self.base.vertices[self.scaffold_corner_ids]
-        # if len(dup_vert_coords_larger_than_2) > 0:
-        #     write_obj_file(f'./{self.savefolder}/dup_verts_larger_than_2.obj', dup_vert_coords_larger_than_2)
+        dup_vert_coords = self.base.vertices[self.scaffold_vids]
+        write_obj_file(f'./{self.savefolder}/dup_verts.obj', dup_vert_coords)
+
+        dup_vert_coords_larger_than_2 = self.base.vertices[self.scaffold_corner_ids]
+        if len(dup_vert_coords_larger_than_2) > 0:
+            write_obj_file(f'./{self.savefolder}/dup_verts_larger_than_2.obj', dup_vert_coords_larger_than_2)
+
+        assert len(self.scaffold_corner_ids) > 0
         # if len(bvids) > 0:
         #     write_obj_file(
         #         f'./{self.savefolder}/mesh_boundary_vertices.obj', 
@@ -158,12 +162,11 @@ class ComplexBuilder():
         all_arcs = []
         ## we find the closest points in each patch to dup_vert_coords_larger_than_2
 
-        for patch_name, m in enumerate(self.mask):
-            # print("patch name", patch_name)
+        for patch_name, m in enumerate(self.mask):          
             patch_mesh = self.base.submesh([m], only_watertight=False)[0]
 
             ## get corner point indices
-            patch_bedges = get_border_edges(patch_mesh)            
+            patch_bedges = get_border_edges(patch_mesh)
             ## get the first in bedge list
             patch_bvids = [edge[0] for edge in patch_bedges]
             # patch_bvids = np.unique(patch_bvids)
@@ -177,6 +180,8 @@ class ComplexBuilder():
             patch_scaffold_vids = self.scaffold_vids[min_id_to_scaffold]
             list_patch_scaffold_vids = patch_scaffold_vids.tolist()
             ## find corner ids in patch_scalfold_vids
+            # write_obj_file(f'./{self.savefolder}/patch_scaffold_vids_{patch_name}.obj', self.base.vertices[patch_scaffold_vids])
+
             crn_ids = []
             for crn_id in self.scaffold_corner_ids: 
                 if crn_id in list_patch_scaffold_vids:
@@ -190,6 +195,7 @@ class ComplexBuilder():
             }
 
             ## loop over the arcs
+            # print("crn_ids", crn_ids)
             for idx in range(len(crn_ids)-1):
                 corner_ids = [patch_scaffold_vids[crn_ids[idx]], patch_scaffold_vids[crn_ids[idx+1]]]
                 arc = {
@@ -207,7 +213,11 @@ class ComplexBuilder():
                 patch_topology['arc_reverse'].append(arc_reverse)
 
             ## handling the final
-            # print(len(patch_scaffold_vids), len(crn_ids), len(self.scaffold_corner_ids))
+            # print(
+            #     "len(patch_scaffold_vids)", len(patch_scaffold_vids), 
+            #     "len(crn_ids)", len(crn_ids), 
+            #     "len(self.scaffold_corner_ids)", len(self.scaffold_corner_ids)
+            #     )
             corner_ids = [patch_scaffold_vids[crn_ids[-1]], patch_scaffold_vids[crn_ids[0]]]
             vertices = patch_scaffold_vids[crn_ids[-1]:]
             vertices = np.concatenate([vertices, patch_scaffold_vids[:crn_ids[0]+1]])
