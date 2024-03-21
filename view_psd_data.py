@@ -31,9 +31,31 @@ def read_psd_segmask(file):
             mask.append([int(x)-1 for x in line.strip().split()])
     return mask
 
-def visualize_psd_shape(shape_file, segmask_file, textured=False):
+def read_psd_segmask_from_segmentation(psd_seg):
+
+    seg_dict = {}
+    # print('psd_seg', psd_seg)
+    for i in range(len(psd_seg)):
+        label = psd_seg[i]
+        if seg_dict.get(label) is None:
+            seg_dict[label] = []
+        
+        seg_dict[label].append(i)
+    
+    mask = []
+    for k, v in seg_dict.items():
+        mask.append(v)
+    # print(mask)
+    return mask
+
+
+def visualize_psd_shape(shape_file, segmask_file, textured=False, from_segmentation=False, psd_seg=None):
     mesh = read_psd_shape(shape_file)
-    mask = read_psd_segmask(segmask_file)
+    if from_segmentation:
+        print('Read from PSD segmentation')
+        mask = read_psd_segmask_from_segmentation(psd_seg)
+    else:
+        mask = read_psd_segmask(segmask_file)
 
     if textured:
         norm = matplotlib.colors.Normalize(0, 20, clip=True)

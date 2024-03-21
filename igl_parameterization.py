@@ -52,8 +52,9 @@ def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None):
     if boundary_len_input is None:
         boundary_length = np.array(list_boundary_length)
     else:
-        boundary_length = np.array(boundary_len_input)
-
+        boundary_length = [0]
+        for x in boundary_len_input:
+            boundary_length.append(np.sum(x))
 
     total_length = np.sum(boundary_length)
     boundary_length_ratio = boundary_length / total_length
@@ -69,12 +70,14 @@ def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None):
 
     ## compute the uv coordinates of each boundary vertex (list_boundary) as linear combination of the coordinates of the end points
     all_boundary_uv = []
-    print(len(list_boundary))
+    # print(len(list_boundary))
     for j, boundary in enumerate(list_boundary):
 
         ## TODO: replace the following equidistant sampling with arc-length sampling
         bnd_vertices = v[boundary]
-        arc_length = np.linalg.norm(bnd_vertices[1:] - bnd_vertices[:-1], axis=1)
+        # arc_length = np.linalg.norm(bnd_vertices[1:] - bnd_vertices[:-1], axis=1)
+        arc_length = boundary_len_input[j]
+
         arc_length = np.concatenate(([0], arc_length))
         cum_arc_length = np.cumsum(arc_length)
         cum_arc_length_ratio = cum_arc_length / cum_arc_length[-1]
@@ -107,6 +110,38 @@ def parameterize_mesh(v, f, crn_ids):
     # bnd_uv = igl.map_vertices_to_circle(v, bnd)
     ## Map to an N-gon
     bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids)
+    bnd = np.array(bnd_list, dtype=np.int64).reshape(-1,1)
+    ## Harmonic parametrization for the internal vertices
+    # print('bnd', bnd.shape, bnd)
+    # print('bnd_uv', bnd_uv.shape, bnd_uv)
+    # print('list_boundary_length', list_boundary_length)
+    uv = igl.harmonic(v, f, bnd, bnd_uv, 1)
+    return uv, bnd_uv, endpoints, list_boundary_length, bnd_list
+
+
+
+def parameterize_mesh_arap_harmonic(v, f, crn_ids, boundary_len):
+
+    bnd = igl.boundary_loop(f)
+    bnd_uv = igl.map_vertices_to_circle(v, bnd)
+
+    ## Harmonic parametrization for the internal vertices
+    uv = igl.harmonic(v, f, bnd, bnd_uv, 1)
+
+    arap = igl.ARAP(v, f, 2, np.zeros(0))
+    uva = arap.solve(np.zeros((0, 0)), uv)
+    print(uva.shape)
+    
+    v = np.concatenate([uva, np.zeros((uva.shape[0], 1))], axis=1)
+    bnd_list = bnd.tolist()
+    
+    for cid in crn_ids:
+        assert cid in bnd_list
+
+    # ## Map the boundary to a circle, preserving edge proportions
+    # bnd_uv = igl.map_vertices_to_circle(v, bnd)
+    ## Map to an N-gon
+    bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids, boundary_len)
     bnd = np.array(bnd_list, dtype=np.int64).reshape(-1,1)
     ## Harmonic parametrization for the internal vertices
     # print('bnd', bnd.shape, bnd)
