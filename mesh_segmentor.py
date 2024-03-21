@@ -29,6 +29,8 @@ class MeshSegmentator():
             save_dir:str = None,
             smooth_flag: bool = False,
             smooth_deg: int = 4,
+            intersection_merged_threshold: float = 0.15,
+            opt_iters: int = 3,
             ) -> None:
         
         self.save_dir = save_dir
@@ -42,11 +44,13 @@ class MeshSegmentator():
         self.b_close_holes = False
         self.smooth_flag = smooth_flag
         self.smooth_deg = smooth_deg
+        self.opt_iters = opt_iters
 
         self.patch_topo_list = [] ## list of PatchTopo class objects
         self.boundary_list = [] ## list of Boundary class objects
         self.cut_list = [] ## list of Cut class objects
         self.texture_img = Image.open(f'./assets/uv_color.png')
+        self.intersection_merged_threshold = intersection_merged_threshold
         logger.info(f'Vertices num: {self.mesh.vertices.shape}; Faces num: {self.mesh.faces.shape}; Masks num: {len(mask)}')
 
 
@@ -760,7 +764,7 @@ class MeshSegmentator():
     
     def split_mesh_with_boundaries(self):
         for cut in self.boundary_list:
-            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, 0.15)
+            new_mesh, new_mask = split_mesh(self.mesh, cut.points, self.mesh.faces, self.intersection_merged_threshold)
             self.mesh = new_mesh
             self.mask = new_mask
 
@@ -772,7 +776,7 @@ class MeshSegmentator():
         for cut in self.cut_list:
             if cut.dead:
                 continue
-            new_mesh, new_mask = split_mesh(self.mesh, list(cut.points), self.mesh.faces, 0.2)
+            new_mesh, new_mask = split_mesh(self.mesh, list(cut.points), self.mesh.faces, self.intersection_merged_threshold)
             self.mesh = new_mesh
             self.mask = new_mask
 
@@ -795,11 +799,14 @@ class MeshSegmentator():
                 if d < 1e-7:
                     boundary_loop_flag = True
 
-                opt_iters = 3
-                for _ in range(opt_iters):
+                for _ in range(self.opt_iters):
                     
                     pt_num = len(self.boundary_list[i].points)
                     logger.debug(f'\tBoundary {i} has {pt_num} points.')
+                    if pt_num < 20:
+                        logger.debug(f'\t< 20. Skip smoothing.')
+                        break
+                    
                     d = np.linalg.norm(fixed_pts[np.newaxis, :] - self.boundary_list[i].points[:, np.newaxis], axis=-1)
                     fixed_boundary_ids = np.argmin(d, axis=0).tolist()
                     if boundary_loop_flag:
@@ -844,9 +851,12 @@ class MeshSegmentator():
 
                     self.boundary_list[i].points = np.array(new_points)
             else:
-                opt_iters = 3
-                for _ in range(opt_iters):
+                for _ in range(self.opt_iters):
                     pt_num = len(self.boundary_list[i].points)
+                    if pt_num < 20:
+                        logger.debug(f'\t< 20. Skip smoothing.')
+                        break
+
                     sample_pt_num = min(max(self.smooth_deg, int(pt_num * 0.2)), pt_num)
                     logger.debug(f'\tBoundary {i} has {pt_num} points. Sample {sample_pt_num} points.')
                     sampled_ids = np.linspace(0, pt_num-1, sample_pt_num, dtype=np.int32).tolist()
@@ -998,29 +1008,3 @@ if __name__ == "__main__":
     segmentor(b_close_holes=False)
     segmentor.save_paths()
     segmentor.save_mesh()
-
-    
-
-
-    # list_boundaries, non_disk_mask, annulus_mask = process_data(
-    #     mesh, mask, merge_annulus=False)
-    # # annulus_cuts = cut_annulus(mesh, annulus_mask)
-    # throughhole_paths = cut_through_holes(mesh, non_disk_mask)
-
-    # cnt = 0
-    # for i, boundaries in enumerate(list_boundaries):
-    #     # print(i, len(boundaries))
-    #     for boundary in boundaries:
-    #         boundary = np.vstack(boundary)
-    #         # print("boundary", boundary[:,0])
-    #         bverts = mesh.vertices[boundary[:,0]]
-    #         trimesh.PointCloud(bverts).export(os.path.join(save_dir,f"list_boundaries_{cnt}.obj"))
-    #         cnt += 1
-    
-    # for i in range(len(throughhole_paths)):
-    #     path = np.vstack(throughhole_paths[i])
-    #     trimesh.PointCloud(path).export(os.path.join(save_dir,f"throughhole_path_{i}.obj"))
-    
-    # # for i in range(len(annulus_cuts)):
-    # #     path = np.vstack(annulus_cuts[i])
-    # #     trimesh.PointCloud(path).export(os.path.join(save_dir,f"annulus_cuts_{i}.obj"))

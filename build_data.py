@@ -9,7 +9,7 @@ import numpy as np
 import json
 import igl
 from src.utils import NpEncoder
-from igl_parameterization import parameterize_mesh, parameterize_mesh_with_boundary_len
+from igl_parameterization import parameterize_mesh, parameterize_mesh_arap_harmonic, parameterize_mesh_with_boundary_len
 from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
 from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
 from PIL import Image
@@ -83,7 +83,8 @@ def parse_args():
                         type=str,
                         help="path to config"
                         )
-    parser.add_argument('--method', type=str, default='harmonic', help='parameterization method')
+    parser.add_argument('--use-smoothed-mesh', action='store_true', help='use smoothed mesh or not')
+    parser.add_argument('--method', type=str, default='harmonic', help='parameterization method [harmonic, BPE_harmonic]')
     
     args = parser.parse_args()
     return args
@@ -95,10 +96,15 @@ if __name__ == '__main__':
 
     ## read data
     data_dir = Path(args.datadir)
-    meshfile = data_dir /'segmented_mesh_smoothed.obj'
     maskfile = data_dir / 'mask.json'
-    if meshfile.exists() is False:
-        meshfile = data_dir /'segmented_mesh_smoothed.ply'
+    if args.use_smoothed_mesh:
+        meshfile = data_dir /'segmented_mesh_smoothed.obj'
+        if meshfile.exists() is False:
+            meshfile = data_dir /'segmented_mesh_smoothed.ply'
+    else:
+        meshfile = data_dir /'segmented_mesh.obj'
+        if meshfile.exists() is False:
+            meshfile = data_dir /'segmented_mesh.ply'
     mesh = trimesh.load(meshfile, process=False, maintain_order=True)
     mask = read_json(maskfile)
 
@@ -199,22 +205,21 @@ if __name__ == '__main__':
             ## compute the length of each boundary
             list_boundary_length = []
             for bnd in list_boundary:
-                bnd_length = 0
+                bnd_length = []
                 ## open curve
                 for bnd_idx in range(len(bnd)-1):
-                    bnd_length += np.linalg.norm(submesh_para.vertices[bnd[bnd_idx]] - submesh_para.vertices[bnd[bnd_idx+1]])
+                    bnd_length.append(np.linalg.norm(submesh.vertices[bnd[bnd_idx]] - submesh.vertices[bnd[bnd_idx+1]]))
                 list_boundary_length.append(bnd_length)
             
-            ## compute the ratio of each boundary to the circumference of a unit circle
-            list_boundary_length.insert(0, 0) ## add the cyclic start
-
+            list_boundary_length_old = list_boundary_length.copy()
             uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length)
             if np.isnan(bnd_uv[0][0]):
                 print('NAN detected, re-parameterize')
+                # uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_arap_harmonic(submesh.vertices, submesh.faces, crn_ids, list_boundary_length_old)
                 uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
         
         else:
-            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+            uv, bnd_uv, crn_uv,  list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
 
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
         crn_uv = np.concatenate((crn_uv, np.zeros((crn_uv.shape[0], 1))), axis=1)
@@ -255,5 +260,3 @@ if __name__ == '__main__':
     write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
 
     
-
-

@@ -470,7 +470,8 @@ def trace_boundary_curves(boundary_edges):
     boundary_curves = []
     boundary_edges = list(boundary_edges)
     while len(boundary_edges) > 0:
-
+        
+        print(len(boundary_edges))
         ## initialize a curve        
         curve = []
         for edge in boundary_edges:

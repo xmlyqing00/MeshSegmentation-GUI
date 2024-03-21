@@ -50,6 +50,8 @@ class AutoSegGUI:
             plt: Plotter, 
             smooth_flag: bool,
             smooth_deg: int,
+            intersection_merged_threshold: float,
+            opt_iters: int
         ) -> None:
         
         
@@ -70,7 +72,13 @@ class AutoSegGUI:
 
         self.plt = plt
         self.output_dir = output_dir
-        self.segmentor = MeshSegmentator(self.tri_mesh, mask, smooth_flag=smooth_flag, smooth_deg=smooth_deg)
+        self.segmentor = MeshSegmentator(
+            self.tri_mesh, mask, 
+            smooth_flag=smooth_flag, 
+            smooth_deg=smooth_deg, 
+            intersection_merged_threshold=intersection_merged_threshold, 
+            opt_iters=opt_iters
+        )
         self.segmentor(b_close_holes=False)
         self.refined_mask = self.segmentor.mask
         self.refined_mesh = VedoMesh([self.segmentor.mesh.vertices, self.segmentor.mesh.faces])
@@ -197,6 +205,9 @@ if __name__ == "__main__":
     parser.add_argument('--outdir', type=str, default='./output', help='Output directory.')
     parser.add_argument('--smooth', action='store_true', help='Smooth the boundary.')
     parser.add_argument('--smooth-deg', type=int, default=4, help='Degree of the smooth boundary.')
+    parser.add_argument('--psd-seg', action='store_true', help='Use the segmentation results.')
+    parser.add_argument('--intersection-merged-threshold', type=float, default=0.15, help='Threshold for merging intersections.')
+    parser.add_argument('--opt-iters', type=int, default=3, help='Number of iterations for optimization.')
     args = parser.parse_args()
 
     logger.info(f'Arguments: {args}')
@@ -227,11 +238,19 @@ if __name__ == "__main__":
     ## load mesh
     shape_id = args.input
     fpath = f"./data/segmentation_data/*/{shape_id}.off"
-    _, mask = visualize_psd_shape(fpath, fpath.replace(".off", "_labels.txt"))
+    segmentation_path = f"./data/segmentation_data/seg_results/{shape_id}.seg"
+    psd_seg = np.loadtxt(segmentation_path, dtype=np.int32)
+
+    _, mask = visualize_psd_shape(
+        fpath, 
+        fpath.replace(".off", "_labels.txt"), 
+        from_segmentation=args.psd_seg,
+        psd_seg=psd_seg
+    )
     mesh = VedoMesh(fpath)
     
     plt = Plotter(axes=8, bg='white', size=(1200, 800))
-    gui = AutoSegGUI(mesh, mask, output_dir, plt, args.smooth, args.smooth_deg)
+    gui = AutoSegGUI(mesh, mask, output_dir, plt, args.smooth, args.smooth_deg, args.intersection_merged_threshold, args.opt_iters)
 
     plt.add_callback('key press', gui.on_key_press)
     plt.add(msg)
