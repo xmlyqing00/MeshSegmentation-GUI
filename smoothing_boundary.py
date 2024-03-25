@@ -163,6 +163,7 @@ def boundary_resampling(mesh:trimesh.Trimesh, boundary_curves:list, is_closed=Fa
         sorted_vertices = mesh.vertices[bcurve]
         distance = np.linalg.norm(sorted_vertices - np.roll(sorted_vertices, 1, axis=0), axis=-1)
         cum_distance = np.cumsum(distance, axis=0)
+        print(cum_distance)
         cum_distance = cum_distance / cum_distance[-1] ## normalize to 0, 1
         resampled_vertices = np.zeros_like(sorted_vertices)
         resampled_vertices[0] = sorted_vertices[0]

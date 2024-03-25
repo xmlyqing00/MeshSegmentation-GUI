@@ -451,6 +451,7 @@ if __name__ == '__main__':
         close_point_merging = True
 
     gui = GUI(tri_mesh, output_dir, plt, args.intersection_merged_threshold, mask, close_point_merging)  
+    gui.save()
 
     plt.add_callback('left click', gui.on_mouse_click)
     plt.add_callback('key press', gui.on_key_press)

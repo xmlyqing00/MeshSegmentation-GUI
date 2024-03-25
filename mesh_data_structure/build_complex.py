@@ -247,7 +247,7 @@ class ComplexBuilder():
         cnt = 0 
         split = True
         while split:
-            print(cnt, len(self.scaffold_corner_ids), split)
+            print('build_complex_recursive', cnt, len(self.scaffold_corner_ids), split)
             cnt += 1
             ## split arcs
             patch_topology_graph, all_arcs = self.main_build()
