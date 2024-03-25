@@ -20,6 +20,8 @@ def normalize_data(mesh):
     mesh_out = mesh.copy()
     mesh_out.apply_translation(-mean_verts)
     mesh_out.apply_scale(1/scale)
+
+    print('mean_verts', mean_verts, 'scale', scale)
     return mesh_out
 
 
