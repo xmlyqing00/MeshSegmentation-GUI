@@ -27,6 +27,36 @@ def write_json(content, fname):
         json.dump(content, handle, indent=4, sort_keys=False, cls=NpEncoder)
 
 
+def draw_colored_points_to_obj(
+    filename, vertices, scalars_for_color, colormap="jet", faces=None, in_vmax=None, in_vmin=None):
+    # print(f"draw colored points to obj file :{filename}\n")
+    assert len(vertices.shape) == 2
+    assert vertices.shape[-1] == 3
+    if colormap == "set":
+        if in_vmax is not None:
+            vmax = in_vmax
+        else:
+            vmax = 20
+        if in_vmin is not None:
+            vmin = in_vmin
+        else:
+            vmin = 0
+        norm = matplotlib.colors.Normalize(vmin, vmax, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.tab20)
+    else:
+        if in_vmax is not None:
+            vmax = in_vmax
+        else:
+            vmax = scalars_for_color.mean()*3
+        if in_vmin is not None:
+            vmin = in_vmin
+        else:
+            vmin = 0.0
+        norm = matplotlib.colors.Normalize(vmin, vmax, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
+    colors = [(r, g, b) for r, g, b, a in mapper.to_rgba(scalars_for_color)]
+    write_obj_file(filename, vertices.reshape(-1, 3), F=faces, C=colors)
+
 def read_obj_file(filename):
     ## read obj file
     with open(filename, 'r') as f:

@@ -6,7 +6,8 @@ import numpy as np
 import igl
 # from meshplot import plot, subplot, interact
 from mesh_data_structure.utils import GeoPathSolverWrapper, get_open_boundary
-
+from src.io_tools import read_obj_file
+import subprocess
 
 def loadtxt_crns(filename):
     with open(filename, "r") as f:
@@ -75,8 +76,8 @@ def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None):
 
         ## TODO: replace the following equidistant sampling with arc-length sampling
         bnd_vertices = v[boundary]
-        # arc_length = np.linalg.norm(bnd_vertices[1:] - bnd_vertices[:-1], axis=1)
-        arc_length = boundary_len_input[j]
+        arc_length = np.linalg.norm(bnd_vertices[1:] - bnd_vertices[:-1], axis=1)
+        # arc_length = boundary_len_input[j]
 
         arc_length = np.concatenate(([0], arc_length))
         cum_arc_length = np.cumsum(arc_length)
@@ -118,6 +119,52 @@ def parameterize_mesh(v, f, crn_ids):
     uv = igl.harmonic(v, f, bnd, bnd_uv, 1)
     return uv, bnd_uv, endpoints, list_boundary_length, bnd_list
 
+def parameterize_mesh_lixin(v, f, crn_ids):
+
+    import shutil, trimesh
+    
+    if os.path.exists(f"./tmp"):
+        shutil.rmtree(f"./tmp")
+    os.makedirs(f"./tmp")
+
+    mesh = trimesh.Trimesh(vertices=v, faces=f, process=False, maintain_convexity=False)
+    mesh.export(f"./tmp/src.obj")
+    
+    def parameterization(
+            meshfile, corner_path, save_ub_path,
+            engine = './npolygon_param/build/parameterization'):
+        input_mesh_path = meshfile
+        input_manifold_corners_path = corner_path
+
+        ret = subprocess.run([engine, input_mesh_path, input_manifold_corners_path, save_ub_path])
+        print("returncode", ret.returncode)
+        return ret.returncode    
+
+    bnd = igl.boundary_loop(f)
+    bnd_list = bnd.tolist()
+    for cid in crn_ids:
+        assert cid in bnd_list
+
+    # ## Map the boundary to a circle, preserving edge proportions
+    # bnd_uv = igl.map_vertices_to_circle(v, bnd)
+    ## Map to an N-gon
+    bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids)
+    bnd = np.array(bnd_list, dtype=np.int64).reshape(-1,1)
+
+    output_uv_path = f"./tmp/uv.obj"
+    corner_path = f"./tmp/corner.txt"
+    with open(corner_path, 'w') as f:
+        f.write(f"{len(crn_ids)}\n")
+        for i in range(len(crn_ids)):
+            f.write(f"{crn_ids[i]} {endpoints[i][0]} {endpoints[i][1]} {list_boundary_length[i]}\n")
+    
+    returncode = parameterization(f"./tmp/src.obj", corner_path, output_uv_path)
+    assert returncode == 0
+
+    # uv = np.loadtxt(output_uv_path, delimiter=' ', usecols=(1,2,3))
+    uv, _ = read_obj_file(output_uv_path)
+    uv2d = uv[:,0:2]
+    return uv2d, bnd_uv, endpoints, list_boundary_length, bnd_list
 
 
 def parameterize_mesh_arap_harmonic(v, f, crn_ids, boundary_len):

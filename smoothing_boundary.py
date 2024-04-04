@@ -11,7 +11,7 @@ from pathlib import Path
 from loguru import logger
 from tqdm import tqdm
 import time
-
+import os, shutil
 from copy import deepcopy
 
 def write_obj_file(filename, V, F=None, C=None, N=None, vid_start=1):
@@ -63,7 +63,7 @@ class LlyodRelax():
     def set_vertices(self, vertices):
 
         if vertices.shape[0] != self.vertices.shape[0] - 1:
-            print(vertices.shape, self.vertices.shape)
+            # print(vertices.shape, self.vertices.shape)
             raise ValueError("vertices shape not match")
         
         self.vertices = vertices
@@ -102,7 +102,7 @@ def laplacian_smooth_mesh(mesh:trimesh.Trimesh, boundary_vertex_ids:list, num_it
     ## get k-ring vertices of boundary vertices
     boundary_vertex_ids = np.unique(boundary_vertex_ids) ## remove duplicated
     vertex_list = boundary_vertex_ids
-    neighborhood_size = 3
+    neighborhood_size = 1
     for i in range(neighborhood_size):
         ## get 1-ring neighbors of vertices in vertex_set
         neighbor_set = set()
@@ -163,7 +163,7 @@ def boundary_resampling(mesh:trimesh.Trimesh, boundary_curves:list, is_closed=Fa
         sorted_vertices = mesh.vertices[bcurve]
         distance = np.linalg.norm(sorted_vertices - np.roll(sorted_vertices, 1, axis=0), axis=-1)
         cum_distance = np.cumsum(distance, axis=0)
-        print(cum_distance)
+        # print(cum_distance)
         cum_distance = cum_distance / cum_distance[-1] ## normalize to 0, 1
         resampled_vertices = np.zeros_like(sorted_vertices)
         resampled_vertices[0] = sorted_vertices[0]
@@ -412,14 +412,15 @@ def refinement(
             segmented_mesh, _ = boundary_resampling(segmented_mesh, boundary_curves) ## boundary vertex ids
             t1 = time.time()
             logger.info(f'boundary_resampling time: {t1 - t0}')
-            segmented_mesh.export(f'boundary_resampled_mesh_{iter_idx}.obj')
+            segmented_mesh.export(Path("debug") / f'boundary_resampled_mesh_{iter_idx}.obj')
+            
             # import matplotlib
             # from matplotlib import cm
             # norm = matplotlib.colors.Normalize(0, 1, clip=True)
             # mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
             # colors = np.linspace(0,1,len(resampled_vertices))
             # colors = mapper.to_rgba(colors)[:,:3]
-            # write_obj_file(f"resampled_boundary_{iter_idx}.obj", resampled_vertices, C=colors)
+            # write_obj_file(Path("debug") / f"resampled_boundary_{iter_idx}.obj", resampled_vertices, C=colors)
 
         if edge_flip_flag:
             t0 = time.time()
@@ -427,21 +428,36 @@ def refinement(
             # segmented_mesh = edge_flip(segmented_mesh, boundary_vertex_ids)
             t1 = time.time()
             logger.info(f'edge_flip time: {t1 - t0}')
-            segmented_mesh.export(f'edgeflip_mesh_{iter_idx}.obj')
+            segmented_mesh.export(Path("debug") / f'edgeflip_mesh_{iter_idx}.obj')
 
         if laplician_flag:
             t0 = time.time()
             segmented_mesh = laplacian_smooth_mesh(segmented_mesh, boundary_vertex_ids, num_iter=3)
             t1 = time.time()
             logger.info(f'laplacian_smooth_mesh time: {t1 - t0}')
-            segmented_mesh.export(f'smoothed_mesh_{iter_idx}.obj')
+            segmented_mesh.export(Path("debug") / f'smoothed_mesh_{iter_idx}.obj')
 
     t0 = time.time()
     segmented_mesh = edge_flip3(segmented_mesh, boundary_vertex_ids)
     t1 = time.time()
     logger.info(f'edge_flip3 time: {t1 - t0}')
+    # return segmented_mesh, viz_list
+    
+    ## 
+    # assert False, 'Need to do an entire laplacian smoothing to avoid duplicated vertices'
+    smoother = LlyodRelax(segmented_mesh, num_iter=3)
+    smoother.set_fixed_vertices(boundary_vertex_ids)
+    smoother.run()
+    updated_vertices = smoother.get_vertices()
 
-    return segmented_mesh, viz_list
+    ## projected to original mesh
+    pq_mesh = trimesh.proximity.ProximityQuery(segmented_mesh)
+    closest, _, _ = pq_mesh.on_surface(updated_vertices)
+    write_obj_file(Path("debug") / f"updated_vertices.obj", closest)
+    ## update the original mesh with the smoothed boundary vertices
+    outmesh = trimesh.Trimesh(vertices=closest, faces=segmented_mesh.faces, process=False, maintain_order=True)
+    # outmesh.export(Path("debug") / f'smoothed_mesh.obj')
+    return outmesh, viz_list
 
 def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
 
@@ -450,7 +466,7 @@ def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
     ## find intersection points (those appear more than twice)
     vertex_count = {}
     bifurcating_vertex_ids = []
-    for edge in boundary_edges:
+    for edge in tqdm(boundary_edges):
         if edge[0] not in vertex_count:
             vertex_count[edge[0]] = 0
         if edge[1] not in vertex_count:
@@ -463,22 +479,23 @@ def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
         if vertex_count[edge[1]] > 2 and edge[1] not in bifurcating_vertex_ids:
             bifurcating_vertex_ids.append(edge[1])
 
-        ## open end
-        if vertex_count[edge[0]] == 1 and edge[0] not in bifurcating_vertex_ids:
-            bifurcating_vertex_ids.append(edge[0])
-        if vertex_count[edge[1]] == 1 and edge[1] not in bifurcating_vertex_ids:
-            bifurcating_vertex_ids.append(edge[1])
+        ## WARNING: this is not correct for CLOSED boundary
+        # ## open end
+        # if vertex_count[edge[0]] == 1 and edge[0] not in bifurcating_vertex_ids:
+        #     bifurcating_vertex_ids.append(edge[0])
+        # if vertex_count[edge[1]] == 1 and edge[1] not in bifurcating_vertex_ids:
+        #     bifurcating_vertex_ids.append(edge[1])
 
-    # bifurcating_count = {}
-    # for vid in bifurcating_vertex_ids:
-    #     bifurcating_count[vid] = vertex_count[vid]
+    bifurcating_count = {}
+    for vid in bifurcating_vertex_ids:
+        bifurcating_count[vid] = vertex_count[vid]
     # print(bifurcating_count)
 
     boundary_curves = []
     boundary_edges = list(boundary_edges)
     while len(boundary_edges) > 0:
         
-        print(len(boundary_edges))
+        # print(len(boundary_edges))
         ## initialize a curve        
         curve = []
         for edge in boundary_edges:
@@ -490,6 +507,7 @@ def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
                 boundary_edges.remove(edge)
                 curve = [edge[1], edge[0]]
                 break
+
         ## trace the curve until encountering a bifurcating vertex
         cnt = 0
         while True:
@@ -505,14 +523,18 @@ def trace_boundary_curves(boundary_edges, segmented_mesh: trimesh.Trimesh=None):
                     break
             if curve[-1] in bifurcating_vertex_ids:
                 break
-
-            # if cnt > 100000:
-            #     logger.info('Infinite loop')
-            #     out = np.array(boundary_edges)    
-            #     remains = np.unique(out.flatten())
-            #     write_obj_file("infinite_loop_remain.obj", segmented_mesh.vertices[remains])
-            #     write_obj_file("infinite_loop_curve.obj", segmented_mesh.vertices[curve])
-            #     input("press any key to continue")            
+            
+            if cnt > 10000:
+                logger.info('Infinite loop')
+                print(vertex_count[curve[-1]])
+                print(bifurcating_count)
+                out = np.array(boundary_edges)    
+                remains = np.unique(out.flatten())
+                write_obj_file("infinite_loop_remain.obj", segmented_mesh.vertices[remains])
+                write_obj_file("infinite_loop_curve.obj", segmented_mesh.vertices[curve])
+                write_obj_file("bifu_vertex.obj", segmented_mesh.vertices[bifurcating_vertex_ids])
+                print(bnd)
+                input("press any key to continue")            
         
         ## store
         boundary_curves.append(curve)
@@ -566,6 +588,14 @@ def import_mesh_mask(outdir: Path):
 
     return segmented_mesh, mask
 
+def trace_shape_open_boundary(mesh):
+    unique_edges = mesh.edges[trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1)]
+    open_boundary_edges = set()
+    for edge in unique_edges:
+        edge = edge.tolist()
+        open_boundary_edges.add(tuple(edge))
+    return open_boundary_edges
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Segmentation GUI')
@@ -577,8 +607,15 @@ if __name__ == '__main__':
     args = parser.parse_args()    
     logger.info(f'Arguments: {args}')
 
+    if os.path.exists('./debug'):
+        shutil.rmtree('./debug')
+    os.makedirs('./debug')
+
     outdir = Path(args.outdir)
     segmented_mesh, mask = import_mesh_mask(outdir)
+    
+    segmented_mesh.export(outdir / 'segmented_mesh.ply')
+    shutil.copy(outdir / 'segmented_mesh.ply', Path('debug') / 'segmented_mesh.ply')
 
     color_img = np.asarray(Image.open('assets/cm_tab20.png').convert('RGBA'))
     cmap = []
@@ -590,12 +627,13 @@ if __name__ == '__main__':
         segmented_mesh.visual.face_colors[group] = cmap[group_idx % 20]
 
     boundary_edges, boundary_pts = apply_mask(segmented_mesh, mask)
-
-    write_obj_file("boundary_points.obj", segmented_mesh.vertices[list(boundary_pts)])
+    open_boundary_edges = trace_shape_open_boundary(segmented_mesh)
+    boundary_edges = boundary_edges.union(set(open_boundary_edges))
 
     boundary_curves, bifurcating_vertex_ids = trace_boundary_curves(boundary_edges, segmented_mesh)
 
-    # write_obj_file("bifurcating_vertex_ids.obj", segmented_mesh.vertices[bifurcating_vertex_ids])
+    write_obj_file(Path('debug') / "boundary_points.obj", segmented_mesh.vertices[list(boundary_pts)])
+    write_obj_file(Path('debug') / "bifurcating_vertex_ids.obj", segmented_mesh.vertices[bifurcating_vertex_ids])
     # for i, bcurve in enumerate(boundary_curves):
     #     write_obj_file(f"boundary_curve_{i}.obj", segmented_mesh.vertices[bcurve])
 
@@ -604,7 +642,16 @@ if __name__ == '__main__':
         args.iters, args.boundary_resample, args.edge_flip, args.laplacian
     )
     export_path = Path(args.outdir) / f'segmented_mesh_smoothed.ply'
-    segmented_mesh.export(str(export_path))
+    smoothed_mesh.export(str(export_path))
+
+    ## project back to the original surface mesh
+    original_mesh = trimesh.load(outdir / 'segmented_mesh.ply', process=False, maintain_order=True) 
+    pq_mesh = trimesh.proximity.ProximityQuery(original_mesh)
+    closest, _, _ = pq_mesh.on_surface(smoothed_mesh.vertices)
+    smoothed_mesh.vertices = closest
+    export_path = Path(args.outdir) / f'segmented_mesh_smoothed_proj.ply'
+    smoothed_mesh.export(str(export_path))
+
     # export_path = str(outdir / f'segmented_mesh_smoothed_{args.iters}.ply')
     # if args.edge_flip:
     #     export_path = export_path.replace('.ply', '_edge_flip.ply')

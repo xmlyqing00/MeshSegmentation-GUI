@@ -9,7 +9,7 @@ import numpy as np
 import json
 import igl
 from src.utils import NpEncoder
-from igl_parameterization import parameterize_mesh, parameterize_mesh_arap_harmonic, parameterize_mesh_with_boundary_len
+from igl_parameterization import parameterize_mesh, parameterize_mesh_arap_harmonic, parameterize_mesh_with_boundary_len, parameterize_mesh_lixin
 from mesh_data_structure.build_complex import normalize_data, ComplexBuilder
 from mesh_data_structure.get_boundary_length_from_mask import get_boundary_length_from_mask
 from PIL import Image
@@ -98,9 +98,11 @@ if __name__ == '__main__':
     data_dir = Path(args.datadir)
     maskfile = data_dir / 'mask.json'
     if args.use_smoothed_mesh:
-        meshfile = data_dir /'segmented_mesh_smoothed.obj'
+        # meshfile = data_dir /'segmented_mesh_smoothed.obj'
+        meshfile = data_dir /'segmented_mesh_smoothed_proj.obj'
         if meshfile.exists() is False:
-            meshfile = data_dir /'segmented_mesh_smoothed.ply'
+            # meshfile = data_dir /'segmented_mesh_smoothed.ply'
+            meshfile = data_dir /'segmented_mesh_smoothed_proj.ply'
     else:
         meshfile = data_dir /'segmented_mesh.obj'
         if meshfile.exists() is False:
@@ -162,10 +164,16 @@ if __name__ == '__main__':
     cell_arc_lengths = []
     for i in range(len(mask)):
 
+        print(f"\n\n Parameterizing patch {i} ...")
+
         nodes = node_ids[cells[i]]
         corners = mesh.vertices[nodes]
         submesh = mesh.submesh([mask[i]], only_watertight=False)[0]
         
+        ## check topology
+        # int ksi = cmesh->numFaces() - cmesh->numEdges() + cmesh->numVertices();
+        ksi = submesh.faces.shape[0] - submesh.edges.shape[0] + submesh.vertices.shape[0]
+
         ## build proximity mesh
         pq_patch = trimesh.proximity.ProximityQuery(submesh)
         crn_ids = pq_patch.vertex(corners)[1].tolist()
@@ -219,7 +227,14 @@ if __name__ == '__main__':
                 uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
         
         else:
-            uv, bnd_uv, crn_uv,  list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+            # uv, bnd_uv, crn_uv,  list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_lixin(submesh.vertices, submesh.faces, crn_ids)
+
+        # ## assert uv has no NAN
+        # assert not np.any(np.isnan(uv)), f"uv has NAN {uv} at patch {i}"
+        if np.any(np.isnan(uv)):
+            print(f"uv has NAN {uv} at patch {i}")
+            # uv = np.zeros_like(uv)
 
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
         crn_uv = np.concatenate((crn_uv, np.zeros((crn_uv.shape[0], 1))), axis=1)
@@ -255,8 +270,8 @@ if __name__ == '__main__':
         # break
 
 
-    for cl in cell_arc_lengths:
-        print(cl)
+    # for cl in cell_arc_lengths:
+    #     print(cl)
     write_json(cell_arc_lengths, os.path.join(savefolder, 'cell_arc_lengths.json'))
 
     

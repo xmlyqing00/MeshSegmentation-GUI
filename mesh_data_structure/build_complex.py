@@ -6,6 +6,7 @@ import numpy as np
 # from common_tools.io_tools import *
 from mesh_data_structure.get_boundary_length_from_mask import get_border_edges, get_border_edges_with_faces
 import trimesh
+from src.io_tools import draw_colored_points_to_obj
 
 from PIL import Image
 import json
@@ -60,7 +61,12 @@ class ComplexBuilder():
         for i, m in enumerate(self.mask):
             faces = self.base.faces[m]
             has_multiple_connected_comp = False
-            bedges = get_border_edges_with_faces(faces, has_multiple_connected_comp=has_multiple_connected_comp)
+            try:
+                bedges = get_border_edges_with_faces(faces, has_multiple_connected_comp=has_multiple_connected_comp)
+            except AssertionError:
+                print("AssertionError", i)
+                return False
+            
             if bedges is not None:
                 if has_multiple_connected_comp:
                     bvids = np.unique(np.concatenate(bedges, axis=0).reshape(-1))
@@ -68,25 +74,24 @@ class ComplexBuilder():
                     bvids = np.unique(np.array(bedges).reshape(-1))
             vert_counts[bvids] += 1
 
-        ## find boundary edges from hand mesh
-        has_multiple_connected_comp = True
-        bedges = get_border_edges(self.base, has_multiple_connected_comp=has_multiple_connected_comp)
-        if bedges is not None:
-            if has_multiple_connected_comp:
-                bvids = np.unique(np.concatenate(bedges, axis=0).reshape(-1))
-            else:
-                bvids = np.unique(np.array(bedges).reshape(-1))
-    
-            ## add one count to boundary vertices
-            vert_counts[bvids] += 1
-        else:
-            bvids = []
-
+        # ## find boundary edges from hand mesh
+        # has_multiple_connected_comp = True
+        # bedges = get_border_edges(self.base, has_multiple_connected_comp=has_multiple_connected_comp)
+        # if bedges is not None:
+        #     if has_multiple_connected_comp:
+        #         bvids = np.unique(np.concatenate(bedges, axis=0).reshape(-1))
+        #     else:
+        #         bvids = np.unique(np.array(bedges).reshape(-1))
+        #     ## add one count to boundary vertices
+        #     vert_counts[bvids] += 1
+        # else:
+        #     bvids = []
         
         ## find duplicated vertices
         self.scaffold_vids = np.where(vert_counts > 1)[0]
         ## find duplicated vertices with more than 2 counts
         self.scaffold_corner_ids = np.where(vert_counts > 2)[0]
+        # np.savetxt(f'./{self.savefolder}/vert_counts.txt', vert_counts[self.scaffold_corner_ids])
         self.scaffold_corner_ids = self.scaffold_corner_ids.tolist()
 
         # ## get duplicated vertices' coordinates
@@ -97,13 +102,25 @@ class ComplexBuilder():
         if len(dup_vert_coords_larger_than_2) > 0:
             write_obj_file(f'./{self.savefolder}/dup_verts_larger_than_2.obj', dup_vert_coords_larger_than_2)
 
+        # print("len(dup_vert_coords)", len(dup_vert_coords))
+        # print("len(dup_vert_coords_larger_than_2)", len(dup_vert_coords_larger_than_2))
+
         assert len(self.scaffold_corner_ids) > 0
+
+        # savefile = os.path.join(self.savefolder, 'mesh_scaffold_vertices.obj')
+        # print(savefile)
+        # # write_obj_file(f'{savefile}', self.base.vertices[self.scaffold_corner_ids])
+        # draw_colored_points_to_obj(
+        #     savefile, 
+        #     self.base.vertices[self.scaffold_corner_ids], 
+        #     scalars_for_color=np.arange(vert_counts[self.scaffold_corner_ids].shape[0]))
+
         # if len(bvids) > 0:
         #     write_obj_file(
         #         f'./{self.savefolder}/mesh_boundary_vertices.obj', 
         #         self.base.vertices[bvids])
 
-        return None
+        return True
 
 
     def arc_dist(self, arc_verts_0, arc_verts_1):
@@ -164,7 +181,7 @@ class ComplexBuilder():
         all_arcs = []
         ## we find the closest points in each patch to dup_vert_coords_larger_than_2
 
-        for patch_name, m in enumerate(self.mask):          
+        for patch_name, m in enumerate(self.mask):
             patch_mesh = self.base.submesh([m], only_watertight=False)[0]
 
             ## get corner point indices
@@ -214,12 +231,13 @@ class ComplexBuilder():
                 patch_topology['arcs'].append(arc_exist)
                 patch_topology['arc_reverse'].append(arc_reverse)
 
-            ## handling the final
+            # # handling the final
             # print(
             #     "len(patch_scaffold_vids)", len(patch_scaffold_vids), 
             #     "len(crn_ids)", len(crn_ids), 
             #     "len(self.scaffold_corner_ids)", len(self.scaffold_corner_ids)
             #     )
+            
             corner_ids = [patch_scaffold_vids[crn_ids[-1]], patch_scaffold_vids[crn_ids[0]]]
             vertices = patch_scaffold_vids[crn_ids[-1]:]
             vertices = np.concatenate([vertices, patch_scaffold_vids[:crn_ids[0]+1]])
@@ -237,6 +255,22 @@ class ComplexBuilder():
 
             ## append
             patch_topology_graph.append(patch_topology)
+
+        # ## visualization
+        # for patch_topology in patch_topology_graph:
+        #     print(patch_topology)
+        #     for idx, arc_id in enumerate(patch_topology['arcs']):
+        #         arc = all_arcs[arc_id]
+                
+        #         arc_reverse = patch_topology['arc_reverse'][idx]
+        #         if arc_reverse:
+        #             vids = arc['vertices'][::-1]
+        #         else:
+        #             vids = arc['vertices']
+        #         draw_colored_points_to_obj(
+        #             f"{patch_topology['patch_name']}_arc_{idx}.obj", 
+        #             self.base.vertices[vids], 
+        #             scalars_for_color=np.arange(len(arc['vertices'])))
 
         return patch_topology_graph, all_arcs
         
