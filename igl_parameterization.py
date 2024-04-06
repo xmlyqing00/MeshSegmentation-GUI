@@ -123,9 +123,9 @@ def parameterize_mesh_lixin(v, f, crn_ids):
 
     import shutil, trimesh
     
-    if os.path.exists(f"./tmp"):
-        shutil.rmtree(f"./tmp")
-    os.makedirs(f"./tmp")
+    # if os.path.exists(f"./tmp"):
+        # shutil.rmtree(f"./tmp")
+    os.makedirs(f"./tmp", exist_ok=True)
 
     mesh = trimesh.Trimesh(vertices=v, faces=f, process=False, maintain_convexity=False)
     mesh.export(f"./tmp/src.obj")
@@ -158,7 +158,9 @@ def parameterize_mesh_lixin(v, f, crn_ids):
         for i in range(len(crn_ids)):
             f.write(f"{crn_ids[i]} {endpoints[i][0]} {endpoints[i][1]} {list_boundary_length[i]}\n")
     
-    returncode = parameterization(f"./tmp/src.obj", corner_path, output_uv_path)
+    engine = ''
+    engine = '/mnt/e/Sources/scripts/npolygon_param/build/parameterization'
+    returncode = parameterization(f"./tmp/src.obj", corner_path, output_uv_path, engine=engine)
     assert returncode == 0
 
     # uv = np.loadtxt(output_uv_path, delimiter=' ', usecols=(1,2,3))

@@ -45,9 +45,10 @@ class LlyodRelax():
         g = nx.from_edgelist(mesh.edges_unique)
 
         # one_ring = [list(g[i].keys()) for i in range(len(mesh.vertices))]
-        one_ring = np.zeros((len(self.vertices), 50), dtype=np.int32) -1  ## last one (-1) is dummy
+        one_ring = np.zeros((len(self.vertices), 60), dtype=np.int32) -1  ## last one (-1) is dummy
         max_val = 0
         for i in range(len(mesh.vertices)):
+            # print(i, one_ring.shape)
             one_ring[i, :len(list(g[i].keys()))] = list(g[i].keys())
             max_val = max(len(list(g[i].keys())), max_val)
 

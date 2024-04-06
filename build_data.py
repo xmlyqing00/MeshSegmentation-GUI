@@ -157,7 +157,7 @@ if __name__ == '__main__':
         BPE_resdir.mkdir(parents=True, exist_ok=True)
 
         if os.sys.platform == 'linux':
-            exe_path = '/mnt/e/Sources/bpe/x64/Release/BPE.exe'
+            raise NotImplementedError("BPE is not supported on Linux")
         else:
             exe_path = 'E:/Sources/bpe/x64/Release/BPE.exe'
                 
@@ -165,6 +165,9 @@ if __name__ == '__main__':
     for i in range(len(mask)):
 
         print(f"\n\n Parameterizing patch {i} ...")
+
+        # if i != 19:
+            # continue
 
         nodes = node_ids[cells[i]]
         corners = mesh.vertices[nodes]
@@ -199,9 +202,23 @@ if __name__ == '__main__':
             bnd_list = bnd.tolist()
             list_boundary = []
             # new_list_bnd = []
+            # bid_old = 0
+            # for crn_idx in range(len(crn_ids)):
+            #     try:
+            #         bid = bnd_list.index(crn_ids[crn_idx])
+            #     except ValueError:
+            #         bid = bid_old + 1
+            #         print('id', crn_ids[crn_idx], bnd_list[bid])
+            #         print('submesh v', submesh.vertices[crn_ids[crn_idx]], submesh.vertices[bnd_list[bid]])
+            #     bid_old = bid
+
+            # crn_ids = (np.array(crn_ids)[valid_ids]).tolist()
+            # corners = corners[valid_ids]
+
             for crn_idx in range(len(crn_ids)):
                 bid0 = bnd_list.index(crn_ids[crn_idx])
-                bid1 = bnd_list.index(crn_ids[(crn_idx+1)%len(crn_ids)])
+                next_idx = (crn_idx+1)%len(crn_ids)
+                bid1 = bnd_list.index(crn_ids[next_idx])
                 
                 if bid0 < bid1:
                     list_boundary.append(bnd_list[bid0:bid1+1])
@@ -221,10 +238,11 @@ if __name__ == '__main__':
             
             list_boundary_length_old = list_boundary_length.copy()
             uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length)
-            if np.isnan(bnd_uv[0][0]):
-                print('NAN detected, re-parameterize')
+            if np.any(np.isnan(uv)) or np.any(np.isnan(bnd_uv)):
+                print('NAN detected, re-parameterize by pure Harmonic ...')
                 # uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_arap_harmonic(submesh.vertices, submesh.faces, crn_ids, list_boundary_length_old)
                 uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
+                
         
         else:
             # uv, bnd_uv, crn_uv,  list_boundary_length, bnd_list = parameterize_mesh(submesh.vertices, submesh.faces, crn_ids)
@@ -233,7 +251,7 @@ if __name__ == '__main__':
         # ## assert uv has no NAN
         # assert not np.any(np.isnan(uv)), f"uv has NAN {uv} at patch {i}"
         if np.any(np.isnan(uv)):
-            print(f"uv has NAN {uv} at patch {i}")
+            print(f"Final UV has NAN {uv} at patch {i}")
             # uv = np.zeros_like(uv)
 
         submesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
@@ -253,6 +271,7 @@ if __name__ == '__main__':
         flat = trimesh.Trimesh(vertices=uv3d, faces=submesh.faces, process=False, maintain_order=True)
         flat.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
         flat.export(f'{saveflatfolder}/flat_{i}.obj')
+        print('save to ', f'{saveflatfolder}/flat_{i}.obj')
 
 
         norm = matplotlib.colors.Normalize(0, 1, clip=True)

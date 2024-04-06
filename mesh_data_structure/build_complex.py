@@ -6,7 +6,7 @@ import numpy as np
 # from common_tools.io_tools import *
 from mesh_data_structure.get_boundary_length_from_mask import get_border_edges, get_border_edges_with_faces
 import trimesh
-from src.io_tools import draw_colored_points_to_obj
+# from src.io_tools import draw_colored_points_to_obj
 
 from PIL import Image
 import json
@@ -104,7 +104,6 @@ class ComplexBuilder():
 
         # print("len(dup_vert_coords)", len(dup_vert_coords))
         # print("len(dup_vert_coords_larger_than_2)", len(dup_vert_coords_larger_than_2))
-
         assert len(self.scaffold_corner_ids) > 0
 
         # savefile = os.path.join(self.savefolder, 'mesh_scaffold_vertices.obj')
