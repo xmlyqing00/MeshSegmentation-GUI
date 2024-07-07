@@ -332,6 +332,9 @@ class ComplexBuilder():
             for idx, arc_id in enumerate(patch_topology['arcs']):
                 arc = all_arcs[arc_id]
                 arc_reverse = patch_topology['arc_reverse'][idx]
+                # this arc is degenrated, skip
+                if arc['corner_ids'][0] == arc['corner_ids'][1]:
+                    continue
                 if arc_reverse:
                     cell.append(all_corner_ids.index(arc['corner_ids'][1]))
                 else:

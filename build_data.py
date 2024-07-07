@@ -164,7 +164,10 @@ if __name__ == '__main__':
     cell_arc_lengths = []
     for i in range(len(mask)):
 
-        print(f"\n\n Parameterizing patch {i} ...")
+        print(f"\n\n Parameterizing patch {i} / {len(mask)}...")
+
+        # if i == 0:
+            # continue
 
         # if i != 19:
             # continue
@@ -186,7 +189,7 @@ if __name__ == '__main__':
         ## parameterization
         if args.method == 'BPE_harmonic':
 
-            submesh_path = BPE_resdir / f'mesh_{i}.ply'
+            submesh_path = BPE_resdir / f'mesh_{i}.obj'
             print('submesh_path', submesh_path)
             submesh.export(submesh_path)
 
@@ -237,6 +240,7 @@ if __name__ == '__main__':
                 list_boundary_length.append(bnd_length)
             
             list_boundary_length_old = list_boundary_length.copy()
+            # print('submesh_para.vertices', submesh_para.vertices)
             uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length)
             if np.any(np.isnan(uv)) or np.any(np.isnan(bnd_uv)):
                 print('NAN detected, re-parameterize by pure Harmonic ...')
