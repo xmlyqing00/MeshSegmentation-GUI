@@ -12,7 +12,7 @@ def vis_path(path, plt, c):
     plt.render()
 
 
-mesh = trimesh.load('tmp/obj_3_mask_3.obj')
+mesh = trimesh.load('tmp/mask_3.obj')
 path_solver = GeoPathSolverWrapper(mesh)
 boundary_loops = get_open_boundary(mesh)
 

@@ -249,7 +249,7 @@ if __name__ == "__main__":
     )
     mesh = VedoMesh(fpath)
     
-    plt = Plotter(axes=8, bg='white', size=(1200, 800))
+    plt = Plotter(axes=0, bg='white', size=(1200, 800))
     gui = AutoSegGUI(mesh, mask, output_dir, plt, args.smooth, args.smooth_deg, args.intersection_merged_threshold, args.opt_iters)
 
     plt.add_callback('key press', gui.on_key_press)

@@ -77,6 +77,7 @@ def compute_distance_matrix(mesh, b_close_holes=True):
         paths = {}
         for i in range(len(boundary_loops)-1):
             for j in range(i+1, len(boundary_loops)):
+                print(f"Computing distance between {i} and {j}")
                 b0 = np.array(boundary_loops[i], dtype=np.int32)[:,0]
                 b0 = np.hstack([b0, boundary_loops[i][-1][1]])
                 b1 = np.array(boundary_loops[j], dtype=np.int32)[:,0]

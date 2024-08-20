@@ -331,8 +331,6 @@ class MeshSegmentator():
         bids = self.patch_topo_list[mask_id].boundary_ids
         assert len(bids) == 2, "Num of boundary_loops in annulus should be 2"
         
-        if mask_id == 4:
-            print(' ')
         found_fixed_indices = False
         for i in range(2):
             if len(self.boundary_list[bids[i]].fixed_indices) == 2:
