@@ -23,7 +23,7 @@ def loadtxt_crns(filename):
     return crns, crn_ids
 
 
-def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None):
+def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None, regular_4edges = False):
         
     list_boundary = []
     new_list_bnd = []
@@ -57,14 +57,17 @@ def map_to_ngon(v, list_bnd, crn_ids, boundary_len_input = None):
         for x in boundary_len_input:
             boundary_length.append(np.sum(x))
 
-    total_length = np.sum(boundary_length)
-    boundary_length_ratio = boundary_length / total_length
+    if regular_4edges:
+        boundary_length_ratio = np.array([0, 0.25, 0.25, 0.25, 0.25])
+    else:
+        total_length = np.sum(boundary_length)
+        boundary_length_ratio = boundary_length / total_length
     print("boundary ratio", boundary_length_ratio)
     boundary_cumsum_ratio = np.cumsum(boundary_length_ratio)
     print("boundary_cumsum ratio", boundary_cumsum_ratio)
     
     ## compute coordinate of each point
-    radius = boundary_cumsum_ratio * 2 * np.pi
+    radius = boundary_cumsum_ratio * 2 * np.pi + np.pi / 4
     # print("radius", radius)
     endpoints_uv = np.stack((np.cos(radius), np.sin(radius))).swapaxes(0,1)
     # print("endpoints_uv", endpoints_uv)
@@ -200,7 +203,7 @@ def parameterize_mesh_arap_harmonic(v, f, crn_ids, boundary_len):
     return uv, bnd_uv, endpoints, list_boundary_length, bnd_list
 
 
-def parameterize_mesh_with_boundary_len(v, f, crn_ids, boundary_len):
+def parameterize_mesh_with_boundary_len(v, f, crn_ids, boundary_len, regular_4edges = False):
 
     bnd = igl.boundary_loop(f)
     bnd_list = bnd.tolist()
@@ -211,7 +214,10 @@ def parameterize_mesh_with_boundary_len(v, f, crn_ids, boundary_len):
     # ## Map the boundary to a circle, preserving edge proportions
     # bnd_uv = igl.map_vertices_to_circle(v, bnd)
     ## Map to an N-gon
-    bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids, boundary_len)
+    if regular_4edges and len(crn_ids) == 4:
+        bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids, boundary_len, regular_4edges)
+    else:
+        bnd_uv, endpoints, list_boundary_length, bnd_list = map_to_ngon(v, bnd_list, crn_ids, boundary_len, regular_4edges=False)
     bnd = np.array(bnd_list, dtype=np.int64).reshape(-1,1)
     ## Harmonic parametrization for the internal vertices
     # print('bnd', bnd.shape, bnd)

@@ -228,10 +228,7 @@ if __name__ == "__main__":
     # os.makedirs(save_dir, exist_ok=True)
 
     current_time = datetime.datetime.now().strftime('%Y%m%d_%H%M')
-    if args.psd_seg:
-        output_dir = os.path.join(args.outdir, f'auto_{args.input}_{current_time}')
-    else:
-        output_dir = os.path.join(args.outdir, f'auto_{args.input.split("/")[-1]}_{current_time}')
+    output_dir = os.path.join(args.outdir, f'auto_{args.input}_{current_time}')
     if os.path.exists(output_dir):
         logger.warning(f'Output directory {output_dir} already exists. Will overwrite.')
     else:
@@ -239,25 +236,18 @@ if __name__ == "__main__":
         os.makedirs(output_dir)
 
     ## load mesh
-    if args.psd_seg:
-        shape_id = args.input
-        fpath = f"./data/segmentation_data/*/{shape_id}.off"
-        segmentation_path = f"./data/segmentation_data/seg_results/{shape_id}.seg"
-        psd_seg = np.loadtxt(segmentation_path, dtype=np.int32)
+    shape_id = args.input
+    fpath = f"./data/segmentation_data/*/{shape_id}.off"
+    segmentation_path = f"./data/segmentation_data/seg_results/{shape_id}.seg"
+    psd_seg = np.loadtxt(segmentation_path, dtype=np.int32)
 
-        _, mask = visualize_psd_shape(
-            fpath, 
-            fpath.replace(".off", "_labels.txt"), 
-            from_segmentation=args.psd_seg,
-            psd_seg=psd_seg
-        )
-        mesh = VedoMesh(fpath)
-    else:
-        fpath = os.path.join(args.input, 'segmented_mesh.ply')
-        segmentation_path = os.path.join(args.input, 'mask.json')
-        with open(segmentation_path, 'r') as f:
-            mask = json.load(f)
-        mesh = VedoMesh(fpath)
+    _, mask = visualize_psd_shape(
+        fpath, 
+        fpath.replace(".off", "_labels.txt"), 
+        from_segmentation=args.psd_seg,
+        psd_seg=psd_seg
+    )
+    mesh = VedoMesh(fpath)
     
     plt = Plotter(axes=0, bg='white', size=(1200, 800))
     gui = AutoSegGUI(mesh, mask, output_dir, plt, args.smooth, args.smooth_deg, args.intersection_merged_threshold, args.opt_iters)

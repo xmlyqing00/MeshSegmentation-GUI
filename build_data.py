@@ -85,6 +85,7 @@ def parse_args():
                         )
     parser.add_argument('--use-smoothed-mesh', action='store_true', help='use smoothed mesh or not')
     parser.add_argument('--method', type=str, default='harmonic', help='parameterization method [harmonic, BPE_harmonic]')
+    parser.add_argument('--regular_4edges', action='store_true', help='regular 4 edges or not')
     
     args = parser.parse_args()
     return args
@@ -241,7 +242,7 @@ if __name__ == '__main__':
             
             list_boundary_length_old = list_boundary_length.copy()
             # print('submesh_para.vertices', submesh_para.vertices)
-            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length)
+            uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_with_boundary_len(submesh_para.vertices, submesh_para.faces, crn_ids, list_boundary_length, args.regular_4edges)
             if np.any(np.isnan(uv)) or np.any(np.isnan(bnd_uv)):
                 print('NAN detected, re-parameterize by pure Harmonic ...')
                 # uv, bnd_uv, crn_uv, list_boundary_length, bnd_list = parameterize_mesh_arap_harmonic(submesh.vertices, submesh.faces, crn_ids, list_boundary_length_old)

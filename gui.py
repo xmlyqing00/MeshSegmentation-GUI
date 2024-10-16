@@ -118,6 +118,8 @@ class GUI:
             self.load_last_mask()
         elif event.keypress == 'm':
             self.toggle_merge_mode()
+        elif event.keypress == 'O':
+            self.save_patches()
     
     
     def update_mask(self):
@@ -390,6 +392,16 @@ class GUI:
 
         logger.success(f'Saved mask and mesh to {self.output_dir}.')
         logger.info('Ready for the next segmentation.')
+    
+
+    def save_patches(self):
+        patch_dir = os.path.join(self.output_dir, 'patches')
+        os.makedirs(patch_dir, exist_ok=True)
+        for i, seg in enumerate(self.mask):
+            patch_mesh = trimesh.Trimesh(self.tri_mesh.vertices, self.tri_mesh.faces[seg,:], process=False)
+            patch_mesh.export(os.path.join(patch_dir, f'patch_{i}.ply'))
+        logger.success(f'Saved patches to {self.output_dir}.')
+
 
 
 if __name__ == '__main__':
@@ -411,7 +423,8 @@ if __name__ == '__main__':
         'Press c to clear ALL picked points.\n' \
         'Press d to load the last segmentations.\n' \
         'Press m to toggle patch merging mode.\n' \
-        'Press h to see more help and default features.'
+        'Press h to see more help and default features.\n' \
+        'Press O (Capital O) to save the patches.\n'
     logger.info(f'Keyboard shortcuts:\n{help_text}')
 
     msg = Text2D(pos='bottom-left', font="VictorMono", s=0.6) 

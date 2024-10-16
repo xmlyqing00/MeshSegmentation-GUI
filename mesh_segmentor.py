@@ -9,6 +9,7 @@ from scipy.spatial.distance import cdist
 import shutil
 import argparse
 import bisect
+from tqdm import trange
 from PIL import Image
 
 from loguru import logger
@@ -390,7 +391,7 @@ class MeshSegmentator():
         # cut_path_u, cut_path_info_u = trace_path_by_samples(mesh, uv, corner_ids[1], sample_num=20)
         cut_path2 = [self.mesh.vertices[a1]]
         
-        for i in range(1, len(cut_path)):
+        for i in trange(1, len(cut_path)):
     
             eid = cut_path_info[i]['eid']
             e = mesh_local.edges_unique[eid]
