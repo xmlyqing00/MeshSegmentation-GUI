@@ -88,26 +88,27 @@ if __name__ == '__main__':
         corner_pcd = trimesh.PointCloud(corner_pts)
         corner_pcd.export(str(out_dir / 'corner_pts.ply'))
 
+    
+    if False:
+        cmd_str = f'{exe_path} {str(out_dir / input_mesh.name)}'
+        os.system(cmd_str)
 
-    cmd_str = f'{exe_path} {str(out_dir / input_mesh.name)}'
-    os.system(cmd_str)
-
-    bpe_mesh_v, bpe_mesh_f = igl.read_triangle_mesh(str(out_dir / f'{input_mesh.stem}_result.obj'))
-    print('bpe_mesh_v', bpe_mesh_v.shape, 'bpe_mesh_f', bpe_mesh_f.shape)
-
-    bnd_uv, corner_uv, list_boundary_length, new_list_bnd = map_to_ngon(v, bnd.tolist(), args.corners)
-    bnd_new = np.array(new_list_bnd, dtype=np.int32).reshape(-1,1)
-    uv = igl.harmonic(bpe_mesh_v, bpe_mesh_f, bnd_new, bnd_uv, 1)
+        bpe_mesh_v, bpe_mesh_f = igl.read_triangle_mesh(str(out_dir / f'{input_mesh.stem}_result.obj'))
+        print('bpe_mesh_v', bpe_mesh_v.shape, 'bpe_mesh_f', bpe_mesh_f.shape)
+        bnd_bpe = igl.boundary_loop(bpe_mesh_f)
+        bnd_uv, corner_uv, list_boundary_length, new_list_bnd = map_to_ngon(bpe_mesh_v, bnd_bpe.tolist(), args.corners)
+        bnd_new = np.array(new_list_bnd, dtype=np.int32).reshape(-1,1)
+        uv = igl.harmonic(bpe_mesh_v, bpe_mesh_f, bnd_new, bnd_uv, 1)
+    else:
+        bnd_uv, corner_uv, list_boundary_length, new_list_bnd = map_to_ngon(v, bnd.tolist(), args.corners)
+        bnd_new = np.array(new_list_bnd, dtype=np.int32).reshape(-1,1)
+        uv = igl.harmonic(v, f, bnd_new, bnd_uv, 1)
 
     # save
     texture_img = Image.open(f'./assets/uv_color.png')
 
     input_trimesh = trimesh.Trimesh(vertices=v, faces=f, process=False, maintain_convexity=False)
-    input_trimesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=None)
-    # crn_uv = np.concatenate((corner_uv, np.zeros((corner_uv.shape[0], 1))), axis=1)
-    # bnd_uv = np.concatenate((bnd_uv, np.zeros((bnd_uv.shape[0], 1))), axis=1)
     input_trimesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=None, image=texture_img)
-
     input_trimesh.export(str(out_dir / 'mesh_uv.obj'))
 
     uv3d = np.concatenate((uv, np.zeros((uv.shape[0], 1))), axis=1)
