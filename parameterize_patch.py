@@ -89,7 +89,7 @@ if __name__ == '__main__':
         corner_pcd.export(str(out_dir / 'corner_pts.ply'))
 
     
-    if False:
+    if True:
         cmd_str = f'{exe_path} {str(out_dir / input_mesh.name)}'
         os.system(cmd_str)
 
